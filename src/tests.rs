@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::*, mac_addr, mac_broadcast_addr, physical::PacketSimulator};
+use crate::{data_link::frame::*, data_link::interface::*, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
 
 #[test]
 fn EthernetFrame_ToBytes_ReturnsValidByteArray() {
