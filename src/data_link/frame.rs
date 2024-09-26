@@ -19,13 +19,16 @@ impl From<u16> for EtherType {
 pub type MacAddress = [u8; 6];
 
 /// Broadcast MAC address
-#[macro_export] macro_rules! mac_broadcast_addr {
+#[macro_export]
+macro_rules! mac_broadcast_addr {
     () => {
         [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
     };
 }
 
-#[macro_export] macro_rules! mac_addr {
+/// Creates a MAC address from a u64
+#[macro_export]
+macro_rules! mac_addr {
     ($num:expr) => {{
         let num = $num as u64;
         [
@@ -36,6 +39,16 @@ pub type MacAddress = [u8; 6];
             ((num >> 8) & 0xff) as u8,
             (num & 0xff) as u8,
         ]
+    }};
+}
+
+/// Creates a generic ARP frame
+/// TODO: This is a hack for now. Need to implement a proper ARP frame.
+#[macro_export]
+macro_rules! arp_frame {
+    ($value:expr) => {{
+        let data = vec![$value; 28]; // Create a 28-byte array filled with the given value
+        data
     }};
 }
 
@@ -64,11 +77,18 @@ impl EthernetFrame {
         }
     }
 
-    /// Creates an EthernetFrame from a byte array
-    pub fn from_bytes(bytes: &Vec<u8>) -> Result<EthernetFrame, std::io::Error>  {
+    pub fn data(&self) -> &Vec<u8> {
+        &self.data
+    }
 
-        if bytes.len() < 26 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame"));
+    pub fn size(&self) -> usize {
+        26 + self.data.len()
+    }
+
+    /// Creates an EthernetFrame from a byte array
+    pub fn from_bytes(bytes: &[u8]) -> Result<EthernetFrame, std::io::Error>  {
+        if bytes.len() < 46 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
         }
 
         // Ignore the preamble and start frame delimiter. Unnecessary for virtual simulation.
@@ -79,23 +99,27 @@ impl EthernetFrame {
         let destination_address = [bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13]];
         let source_address = [bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19]];
 
-        let ether_type = u16::from_be_bytes([bytes[20], bytes[21]]);
+        let ether_type: EtherType = u16::from_be_bytes([bytes[20], bytes[21]]).into();
 
-        let data = bytes[22..bytes.len()-4].to_vec();
+        // TODO: Better arp code
+        if ether_type != EtherType::Arp {
+            panic!("Only ARP is supported currently.")
+        }
 
-        let frame_check_sequence = u32::from_be_bytes([bytes[bytes.len()-4], bytes[bytes.len()-3], bytes[bytes.len()-2], bytes[bytes.len()-1]]);
+        // Arp is 28 bytes
+        let data = bytes[22..50].to_vec();
+
+        let frame_check_sequence = u32::from_be_bytes([bytes[50], bytes[51], bytes[52], bytes[53]]);
 
         Ok(EthernetFrame {
             preamble,
             start_frame_delimiter,
             destination_address,
             source_address,
-            ether_type: ether_type.into(),
+            ether_type,
             data,
             frame_check_sequence,
         })
-
-        
     }
 
     /// Converts the EthernetFrame to a byte array
