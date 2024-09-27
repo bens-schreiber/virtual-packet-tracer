@@ -1,11 +1,16 @@
 mod physical {
     pub mod packet_sim;
-    pub mod port;
+    pub mod ethernet_port;
 }
 
 mod data_link {
-    pub mod frame;
-    pub mod interface;
+    pub mod ethernet_frame;
+    pub mod ethernet_interface;
+    pub mod arp_frame;
+}
+
+mod network {
+    pub mod ipv4;
 }
 
 #[cfg(test)]

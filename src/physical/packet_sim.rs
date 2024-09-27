@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use super::port::EthernetPort;
+use super::ethernet_port::EthernetPort;
 
 /// Simulates the movement of data over a physical connection between EthernetPorts.
 pub struct PacketSimulator {

@@ -1,15 +1,18 @@
 use std::{cell::RefCell, rc::Rc};
 
 /// A physical ethernet port capable of sending and receiving bytes via a physical (cable) connection.
+/// 
+/// This simulated port uses the idea of an Interpacket Gap (IPG) to prepare between frames for transmission
+/// (represented by the Vec<Vec<u8>>, each Vec<u8> is a frame, able to be individually received because of the IPG).
 pub struct EthernetPort {
 
     /// Incoming bytes from the physical connection
-    incoming_buffer: Vec<u8>,
+    incoming_buffer: Vec<Vec<u8>>,
 
     /// Outgoing bytes to the physical connection.
     /// Note that the EthernetPort is only responsible for putting bytes into this buffer.
     /// The simulator will take care of moving the bytes to the other port.
-    outgoing_buffer: Vec<u8>,
+    outgoing_buffer: Vec<Vec<u8>>,
 
     /// None if a physical connection is not established
     connection: Option<Rc<RefCell<EthernetPort>>>,
@@ -36,8 +39,8 @@ impl EthernetPort {
     }
 
     /// Appends the data to the outgoing buffer.
-    pub fn add_outgoing(&mut self, data: &mut Vec<u8>) {
-        self.outgoing_buffer.append(data);
+    pub fn add_outgoing(&mut self, data: &Vec<u8>) {
+        self.outgoing_buffer.push(data.clone());
     }
 
     /// Consumes the outgoing buffer and appends it to the other's incoming buffer.
@@ -46,7 +49,7 @@ impl EthernetPort {
     }
 
     /// Consumes the incoming buffer and returns it.
-    pub fn consume_incoming(&mut self) -> Vec<u8> {
+    pub fn consume_incoming(&mut self) -> Vec<Vec<u8>> {
         let mut incoming = vec![];
         incoming.append(&mut self.incoming_buffer);
 

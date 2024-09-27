@@ -3,7 +3,7 @@
 /// An Ethernet II frame type
 pub enum EtherType {
     Arp = 0x0806,
-    Unknown = 0xFFFF,
+    Unknown,
 }
 
 impl From<u16> for EtherType {
@@ -45,7 +45,7 @@ macro_rules! mac_addr {
 /// Creates a generic ARP frame
 /// TODO: This is a hack for now. Need to implement a proper ARP frame.
 #[macro_export]
-macro_rules! arp_frame {
+macro_rules! ether_payload {
     ($value:expr) => {{
         let data = vec![$value; 28]; // Create a 28-byte array filled with the given value
         data
@@ -80,13 +80,9 @@ impl EthernetFrame {
     pub fn data(&self) -> &Vec<u8> {
         &self.data
     }
-
-    pub fn size(&self) -> usize {
-        26 + self.data.len()
-    }
-
+    
     /// Creates an EthernetFrame from a byte array
-    pub fn from_bytes(bytes: &[u8]) -> Result<EthernetFrame, std::io::Error>  {
+    pub fn from_bytes(bytes: &Vec<u8>) -> Result<EthernetFrame, std::io::Error>  {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
         }
@@ -101,15 +97,9 @@ impl EthernetFrame {
 
         let ether_type: EtherType = u16::from_be_bytes([bytes[20], bytes[21]]).into();
 
-        // TODO: Better arp code
-        if ether_type != EtherType::Arp {
-            panic!("Only ARP is supported currently.")
-        }
+        let data = bytes[22..bytes.len()-4].to_vec();
 
-        // Arp is 28 bytes
-        let data = bytes[22..50].to_vec();
-
-        let frame_check_sequence = u32::from_be_bytes([bytes[50], bytes[51], bytes[52], bytes[53]]);
+        let frame_check_sequence = u32::from_be_bytes([bytes[bytes.len()-4], bytes[bytes.len()-3], bytes[bytes.len()-2], bytes[bytes.len()-1]]);
 
         Ok(EthernetFrame {
             preamble,
