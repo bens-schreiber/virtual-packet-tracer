@@ -2,7 +2,7 @@
 #[derive(Debug, PartialEq, Clone)]
 /// An Ethernet II frame type
 pub enum EtherType {
-    IPv4 = 0x0800,
+    Ipv4 = 0x0800,
     Arp = 0x0806,
     Debug = 0xFFFF,
 }
@@ -10,7 +10,7 @@ pub enum EtherType {
 impl From<u16> for EtherType {
     fn from(item: u16) -> Self {
         match item {
-            0x0800 => EtherType::IPv4,
+            0x0800 => EtherType::Ipv4,
             0x0806 => EtherType::Arp,
             _ => EtherType::Debug,
         }

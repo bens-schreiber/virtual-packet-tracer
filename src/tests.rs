@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, network::{ipv4::IPv4Frame, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
 
 #[test]
 fn EthernetFrame_ToBytes_ReturnsValidByteArray() {
@@ -310,7 +310,7 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
 }
 
 #[test]
-fn NetworkInterface_SendUni_ReceivesIPv4Frame() {
+fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
     // Arrange
     let mut sim = PacketSimulator::new();
     let mut interface1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
@@ -328,7 +328,7 @@ fn NetworkInterface_SendUni_ReceivesIPv4Frame() {
     interface1.receive(); // Process ARP reply
 
     // Act
-    let result = interface1.send(interface2.ip_address(), ether_payload!(1));  // Sends IPv4 frame
+    let result = interface1.send(interface2.ip_address(), ether_payload!(1));  // Sends Ipv4 frame
     sim.tick();
 
     let received_data = interface2.receive();
@@ -336,7 +336,7 @@ fn NetworkInterface_SendUni_ReceivesIPv4Frame() {
     // Assert
     assert!(result);
     assert!(received_data.len() == 1);
-    assert_eq!(received_data[0], IPv4Frame::new(
+    assert_eq!(received_data[0], Ipv4Frame::new(
         interface1.ip_address(),
         interface2.ip_address(),
         ether_payload!(1)

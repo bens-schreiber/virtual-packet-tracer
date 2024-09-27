@@ -1,7 +1,7 @@
-pub type IPv4Address = [u8; 4];
+pub type Ipv4Address = [u8; 4];
 
 #[derive(Debug, PartialEq)]
-pub struct IPv4Frame {
+pub struct Ipv4Frame {
     version_hlen : u8,              // 4 bits version, 4 bits header length
     tos : u8,                       // Type of service
     total_length : u16,             // Total length of the frame
@@ -10,16 +10,16 @@ pub struct IPv4Frame {
     ttl : u8,                       // Time to live
     protocol : u8,
     checksum : u16,
-    source : IPv4Address,
-    destination : IPv4Address,
+    source : Ipv4Address,
+    destination : Ipv4Address,
     option: Vec<u8>,
     data : Vec<u8>
 }
 
-impl IPv4Frame {
-    pub fn new(source: IPv4Address, destination: IPv4Address, data: Vec<u8>) -> IPv4Frame {
-        IPv4Frame {
-            version_hlen: 0x45, // IPv4, 5 words
+impl Ipv4Frame {
+    pub fn new(source: Ipv4Address, destination: Ipv4Address, data: Vec<u8>) -> Ipv4Frame {
+        Ipv4Frame {
+            version_hlen: 0x45, // Ipv4, 5 words
             tos: 0,
             total_length: 20 + data.len() as u16,
             id: 0,
@@ -51,13 +51,13 @@ impl IPv4Frame {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<IPv4Frame, &'static str> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Ipv4Frame, &'static str> {
         if bytes.len() < 20 {
-            return Err("IPv4 frame does not have 20 bytes");
+            return Err("Ipv4 frame does not have 20 bytes");
         }
 
         if bytes.len() > 65535 {
-            return Err("IPv4 frame is too large");
+            return Err("Ipv4 frame is too large");
         }
 
         let version_hlen = bytes[0];
@@ -73,7 +73,7 @@ impl IPv4Frame {
         let option = bytes[20..(version_hlen & 0x0F) as usize * 4].to_vec();
         let data = bytes[(version_hlen & 0x0F) as usize * 4..].to_vec();
         
-        Ok(IPv4Frame {
+        Ok(Ipv4Frame {
             version_hlen,
             tos,
             total_length,

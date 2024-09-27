@@ -1,5 +1,5 @@
 use super::ethernet_frame::MacAddress;
-use crate::network::ipv4::IPv4Address;
+use crate::network::ipv4::Ipv4Address;
 
 #[repr(u16)]
 #[derive(Copy, Clone, PartialEq)]
@@ -26,22 +26,22 @@ pub struct ArpFrame {
     protocol_size: u8,
     pub opcode: ArpOperation,
     pub sender_mac: MacAddress,
-    pub sender_ip: IPv4Address,
+    pub sender_ip: Ipv4Address,
     pub target_mac: MacAddress,
-    pub target_ip: IPv4Address,
+    pub target_ip: Ipv4Address,
 }
 
 impl ArpFrame {
     pub fn new(
         opcode: ArpOperation,
         sender_mac: MacAddress,
-        sender_ip: IPv4Address,
+        sender_ip: Ipv4Address,
         target_mac: MacAddress,
-        target_ip: IPv4Address,
+        target_ip: Ipv4Address,
     ) -> ArpFrame {
         ArpFrame {
             hardware_type: 1,       // Ethernet
-            protocol_type: 0x0800,  // IPv4
+            protocol_type: 0x0800,  // Ipv4
             hardware_size: 6,
             protocol_size: 4,
             opcode,

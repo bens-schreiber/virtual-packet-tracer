@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{mac_addr, mac_broadcast_addr, network::ipv4::IPv4Address, physical::ethernet_port::EthernetPort};
+use crate::{mac_addr, mac_broadcast_addr, network::ipv4::Ipv4Address, physical::ethernet_port::EthernetPort};
 use super::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{EtherType, EthernetFrame, MacAddress}};
 
 pub struct EthernetInterface {
@@ -30,7 +30,7 @@ impl EthernetInterface {
     }
 
     /// Sends an ARP request; find the MAC address of the target IP address.
-    pub fn send_arp_request(&mut self, sender: IPv4Address, target: IPv4Address) {
+    pub fn send_arp_request(&mut self, sender: Ipv4Address, target: Ipv4Address) {
         let arp = ArpFrame::new(
             ArpOperation::Request,
             self.mac_address,
@@ -43,7 +43,7 @@ impl EthernetInterface {
     }
 
     /// Sends an ARP reply; respond to an ARP request.
-    pub fn send_arp_reply(&mut self, sender_ip: IPv4Address, target: IPv4Address) {
+    pub fn send_arp_reply(&mut self, sender_ip: Ipv4Address, target: Ipv4Address) {
         let arp = ArpFrame::new(
             ArpOperation::Reply,
             self.mac_address,

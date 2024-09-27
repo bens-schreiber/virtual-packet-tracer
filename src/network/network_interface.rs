@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
 use crate::data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{EtherType, MacAddress}, ethernet_interface::EthernetInterface};
-use super::ipv4::{IPv4Address, IPv4Frame};
+use super::ipv4::{Ipv4Address, Ipv4Frame};
 
 
 pub struct NetworkInterface {
     pub ethernet: EthernetInterface,
-    ip_address: IPv4Address,
-    arp_table: HashMap<IPv4Address, MacAddress>,
+    ip_address: Ipv4Address,
+    arp_table: HashMap<Ipv4Address, MacAddress>,
 }
 
 impl NetworkInterface {
-    pub fn new(mac_address: MacAddress, ip_address: IPv4Address) -> NetworkInterface {
+    pub fn new(mac_address: MacAddress, ip_address: Ipv4Address) -> NetworkInterface {
         NetworkInterface {
             ethernet: EthernetInterface::new(mac_address),
             ip_address,
@@ -19,23 +19,23 @@ impl NetworkInterface {
         }
     }
 
-    pub fn ip_address(&self) -> IPv4Address {
+    pub fn ip_address(&self) -> Ipv4Address {
         self.ip_address
     }
 
-    /// Attempts to send data to the destination IP address as an IPv4Frame.
+    /// Attempts to send data to the destination IP address as an Ipv4Frame.
     /// 
     /// If the MAC address of the destination IP address is not in the ARP table, an ARP request is sent.
     /// 
     /// Returns true if the data was sent successfully.
     /// 
     /// Returns false if the MAC address of the destination IP address is not in the ARP table.
-    pub fn send(&mut self, destination: IPv4Address, data: Vec<u8>) -> bool {
+    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
         if let Some(mac_address) = self.arp_table.get(&destination) {
 
-            let bytes = IPv4Frame::new(self.ip_address, destination, data).to_bytes();
+            let bytes = Ipv4Frame::new(self.ip_address, destination, data).to_bytes();
             
-            self.ethernet.send(*mac_address, EtherType::IPv4, bytes);
+            self.ethernet.send(*mac_address, EtherType::Ipv4, bytes);
             return true;
         }
 
@@ -47,16 +47,16 @@ impl NetworkInterface {
 
     /// Receives data from the ethernet interface. Processes ARP frames to the ARP table.
     /// Sends an ARP reply if this interface is the target.
-    pub fn receive(&mut self) -> Vec<IPv4Frame> {
+    pub fn receive(&mut self) -> Vec<Ipv4Frame> {
         let mut ipv4_frames = Vec::new();
         let frames = self.ethernet.receive();
 
         for frame in frames {
 
-            if frame.ether_type == EtherType::IPv4 {
-                let ipv4_frame = match IPv4Frame::from_bytes(frame.data()) {
+            if frame.ether_type == EtherType::Ipv4 {
+                let ipv4_frame = match Ipv4Frame::from_bytes(frame.data()) {
                     Ok(ipv4_frame) => ipv4_frame,
-                    Err(_) => continue  // Discard invalid IPv4 frames
+                    Err(_) => continue  // Discard invalid Ipv4 frames
                 };
 
                 ipv4_frames.push(ipv4_frame);
