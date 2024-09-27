@@ -2,7 +2,7 @@ use super::ethernet_frame::MacAddress;
 use crate::network::ipv4::IPv4Address;
 
 #[repr(u16)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum ArpOperation {
     Request = 1,
     Reply = 2,
@@ -24,11 +24,11 @@ pub struct ArpFrame {
     protocol_type: u16,
     hardware_size: u8,
     protocol_size: u8,
-    opcode: ArpOperation,
-    sender_mac: MacAddress,
-    sender_ip: IPv4Address,
-    target_mac: MacAddress,
-    target_ip: IPv4Address,
+    pub opcode: ArpOperation,
+    pub sender_mac: MacAddress,
+    pub sender_ip: IPv4Address,
+    pub target_mac: MacAddress,
+    pub target_ip: IPv4Address,
 }
 
 impl ArpFrame {

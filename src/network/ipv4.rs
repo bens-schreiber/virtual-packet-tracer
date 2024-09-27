@@ -1,5 +1,6 @@
 pub type IPv4Address = [u8; 4];
 
+#[derive(Debug, PartialEq)]
 pub struct IPv4Frame {
     version_hlen : u8,              // 4 bits version, 4 bits header length
     tos : u8,                       // Type of service

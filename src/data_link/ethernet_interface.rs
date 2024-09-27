@@ -30,7 +30,7 @@ impl EthernetInterface {
     }
 
     /// Sends an ARP request; find the MAC address of the target IP address.
-    pub fn send_arp(&mut self, sender: IPv4Address, target: IPv4Address) {
+    pub fn send_arp_request(&mut self, sender: IPv4Address, target: IPv4Address) {
         let arp = ArpFrame::new(
             ArpOperation::Request,
             self.mac_address,
@@ -39,14 +39,27 @@ impl EthernetInterface {
             target,
         ).to_bytes();
 
-        self.send(mac_broadcast_addr!(), arp);
+        self.send(mac_broadcast_addr!(), EtherType::Arp, arp);
+    }
+
+    /// Sends an ARP reply; respond to an ARP request.
+    pub fn send_arp_reply(&mut self, sender_ip: IPv4Address, target: IPv4Address) {
+        let arp = ArpFrame::new(
+            ArpOperation::Reply,
+            self.mac_address,
+            sender_ip,
+            self.mac_address,
+            target,
+        ).to_bytes();
+
+        self.send(mac_broadcast_addr!(), EtherType::Arp, arp);
     }
 
     /// Sends data as an EthernetFrame.
     /// 
     /// NOTE: The data is not sent immediately. It is added to the outgoing buffer. Simulator must be ticked to send the data.
-    pub fn send(&mut self, destination: MacAddress, data: Vec<u8>) {
-        let frame = EthernetFrame::new(destination, self.mac_address, data, EtherType::Arp);
+    pub fn send(&mut self, destination: MacAddress, ether_type: EtherType, data: Vec<u8>) {
+        let frame = EthernetFrame::new(destination, self.mac_address, data, ether_type);
         self.port.borrow_mut().add_outgoing(&frame.to_bytes());
     }
 

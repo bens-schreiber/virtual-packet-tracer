@@ -2,15 +2,17 @@
 #[derive(Debug, PartialEq, Clone)]
 /// An Ethernet II frame type
 pub enum EtherType {
+    IPv4 = 0x0800,
     Arp = 0x0806,
-    Unknown,
+    Debug = 0xFFFF,
 }
 
 impl From<u16> for EtherType {
     fn from(item: u16) -> Self {
         match item {
+            0x0800 => EtherType::IPv4,
             0x0806 => EtherType::Arp,
-            _ => EtherType::Unknown,
+            _ => EtherType::Debug,
         }
     }
 }
@@ -58,7 +60,7 @@ pub struct EthernetFrame {
     start_frame_delimiter: u8,
     destination_address: MacAddress,
     source_address: MacAddress,
-    ether_type: EtherType,
+    pub ether_type: EtherType,
     data: Vec<u8>,
     frame_check_sequence: u32,
 }
@@ -94,7 +96,6 @@ impl EthernetFrame {
         let preamble = [0x55; 7];
         let start_frame_delimiter = 0xD5;
 
-        
         let destination_address = [bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13]];
         let source_address = [bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19]];
 
