@@ -15,7 +15,11 @@ mod network {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    pub mod ethernet_tests;
+    pub mod packet_sim_tests;
+    pub mod network_interface_tests;
+}
 
 fn main() {
     println!("Hello, world!");
