@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, network::{self, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
 
 #[test]
 fn EthernetFrame_ToBytes_ReturnsValidByteArray() {
@@ -64,7 +64,7 @@ fn EthernetInterface_Receive_ReturnsEmptyVecWhenNoData() {
     let mut interface = EthernetInterface::new(mac_addr!(1));
 
     // Act
-    let result = interface.receive_frames();
+    let result = interface.receive();
 
     // Assert
     assert!(result.is_empty());
@@ -84,9 +84,9 @@ fn PacketSimulator_Tick_ConsumesAllOutgoing() {
 
     EthernetInterface::connect_port(&mut interface1, &mut interface2);
 
-    interface1.send_data(ether_payload!(1));
-    interface2.send_data(ether_payload!(2));
-    uc_interface.send_data(ether_payload!(3));
+    interface1.send(mac_addr!(0), ether_payload!(1));
+    interface2.send(mac_addr!(0), ether_payload!(2));
+    uc_interface.send(mac_addr!(0), ether_payload!(3));
 
     // Act
     sim.tick();
@@ -111,18 +111,18 @@ fn EthernetInterface_SendDataMonodirectional_ReceivesFrame() {
     EthernetInterface::connect_port(&mut interface1, &mut interface2);
 
     // Act
-    interface1.send_data(ether_payload!(1));
+    interface1.send(mac_addr!(0), ether_payload!(1));
     sim.tick();
 
-    let received_data1 = interface1.receive_frames();
-    let received_data2 = interface2.receive_frames();
+    let received_data1 = interface1.receive();
+    let received_data2 = interface2.receive();
 
     // Assert
     assert!(received_data1.is_empty());
     assert!(received_data2.len() == 1);
 
     assert_eq!(received_data2[0], EthernetFrame::new(
-        mac_broadcast_addr!(),
+        mac_addr!(0),
         interface1.mac_address(),
         ether_payload!(1),
         EtherType::Arp
@@ -142,26 +142,26 @@ fn EthernetInterface_SendDataBidirectional_ReceivesFrames() {
     EthernetInterface::connect_port(&mut interface1, &mut interface2);
 
     // Act
-    interface1.send_data(ether_payload!(1));
-    interface2.send_data(ether_payload!(2));
+    interface1.send(mac_addr!(0), ether_payload!(1));
+    interface2.send(mac_addr!(0), ether_payload!(2));
     sim.tick();
 
-    let received_data1 = interface1.receive_frames();
-    let received_data2 = interface2.receive_frames();
+    let received_data1 = interface1.receive();
+    let received_data2 = interface2.receive();
 
     // Assert
     assert!(received_data1.len() == 1);
     assert!(received_data2.len() == 1);
 
     assert_eq!(received_data1[0], EthernetFrame::new(
-        mac_broadcast_addr!(),
+        mac_addr!(0),
         interface2.mac_address(),
         ether_payload!(2),
         EtherType::Arp
     ));
 
     assert_eq!(received_data2[0], EthernetFrame::new(
-        mac_broadcast_addr!(),
+        mac_addr!(0),
         interface1.mac_address(),
         ether_payload!(1),
         EtherType::Arp
@@ -182,11 +182,11 @@ fn EthernetInterface_SendMultipleOutgoingMonodirectionalData_ReceivesAllData() {
         EthernetInterface::connect_port(&mut interface1, &mut interface2);
 
         // Act
-        interface1.send_data(ether_payload!(1));
-        interface1.send_data(ether_payload!(2));
-        interface1.send_data(ether_payload!(3));
+        interface1.send(mac_addr!(0), ether_payload!(1));
+        interface1.send(mac_addr!(0), ether_payload!(2));
+        interface1.send(mac_addr!(0), ether_payload!(3));
         sim.tick();
-        let received_data = interface2.receive_frames();
+        let received_data = interface2.receive();
 
         // Assert
         assert!(received_data.len() == 3);
@@ -208,16 +208,16 @@ fn EthernetInterface_SendMultipleOutgoingBidirectional_ReceivesAllData() {
     EthernetInterface::connect_port(&mut interface1, &mut interface2);
 
     // Act
-    interface1.send_data(ether_payload!(1));
-    interface1.send_data(ether_payload!(2));
-    interface1.send_data(ether_payload!(3));
+    interface1.send(mac_addr!(0), ether_payload!(1));
+    interface1.send(mac_addr!(0), ether_payload!(2));
+    interface1.send(mac_addr!(0), ether_payload!(3));
     
-    interface2.send_data(ether_payload!(4));
-    interface2.send_data(ether_payload!(5));
-    interface2.send_data(ether_payload!(6));
+    interface2.send(mac_addr!(0), ether_payload!(4));
+    interface2.send(mac_addr!(0), ether_payload!(5));
+    interface2.send(mac_addr!(0), ether_payload!(6));
     sim.tick();
-    let received_data1 = interface1.receive_frames();
-    let received_data2 = interface2.receive_frames();
+    let received_data1 = interface1.receive();
+    let received_data2 = interface2.receive();
 
     // Assert
     assert!(received_data1.len() == 3);
@@ -230,4 +230,42 @@ fn EthernetInterface_SendMultipleOutgoingBidirectional_ReceivesAllData() {
     assert_eq!(*received_data2[0].data(), ether_payload!(1));
     assert_eq!(*received_data2[1].data(), ether_payload!(2));
     assert_eq!(*received_data2[2].data(), ether_payload!(3));
+}
+
+#[test]
+fn NetworkInterface_SendToUnknownIpV4_RecieveArpFrame() {
+    // Arrange
+    let mut sim = PacketSimulator::new();
+    let mut n_interface1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
+    let mut n_interface2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
+
+    sim.add_port(n_interface1.ethernet.port());
+    sim.add_port(n_interface2.ethernet.port());
+
+    EthernetInterface::connect_port(&mut n_interface1.ethernet, &mut n_interface2.ethernet);
+
+    // Act
+    let result = n_interface1.send(n_interface2.ip_address(), ether_payload!(1));
+    sim.tick();
+
+    let received_data1 = n_interface1.ethernet.receive();
+    let received_data2 = n_interface2.ethernet.receive();
+
+    // Assert
+    assert!(received_data1.is_empty());
+    assert!(received_data2.len() == 1);
+    assert!(!result);
+
+    assert_eq!(received_data2[0], EthernetFrame::new(
+        mac_broadcast_addr!(),
+        n_interface1.ethernet.mac_address(),
+        ArpFrame::new(
+            ArpOperation::Request,
+            n_interface1.ethernet.mac_address(),
+            n_interface1.ip_address(),
+            mac_addr!(0),
+            n_interface2.ip_address()
+        ).to_bytes(),
+        EtherType::Arp
+    ));
 }

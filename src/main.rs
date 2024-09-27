@@ -11,6 +11,7 @@ mod data_link {
 
 mod network {
     pub mod ipv4;
+    pub mod network_interface;
 }
 
 #[cfg(test)]

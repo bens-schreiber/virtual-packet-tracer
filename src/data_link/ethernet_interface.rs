@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{mac_broadcast_addr, physical::ethernet_port::EthernetPort};
-use super::ethernet_frame::{EtherType, EthernetFrame, MacAddress};
+use crate::{mac_addr, mac_broadcast_addr, network::ipv4::IPv4Address, physical::ethernet_port::EthernetPort};
+use super::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{EtherType, EthernetFrame, MacAddress}};
 
 pub struct EthernetInterface {
     port: Rc<RefCell<EthernetPort>>,
@@ -29,23 +29,29 @@ impl EthernetInterface {
         EthernetPort::connect_ports(self.port.clone(), other.port.clone());
     }
 
-    /// TODO: Assumes ARP for now
-    /// 
+    /// Sends an ARP request; find the MAC address of the target IP address.
+    pub fn send_arp(&mut self, sender: IPv4Address, target: IPv4Address) {
+        let arp = ArpFrame::new(
+            ArpOperation::Request,
+            self.mac_address,
+            sender,
+            mac_addr!(0),
+            target,
+        ).to_bytes();
+
+        self.send(mac_broadcast_addr!(), arp);
+    }
+
     /// Sends data as an EthernetFrame.
     /// 
     /// NOTE: The data is not sent immediately. It is added to the outgoing buffer. Simulator must be ticked to send the data.
-    pub fn send_data(&mut self, data: Vec<u8>) {
-        self.port.borrow_mut().add_outgoing(&mut EthernetFrame::new(
-            mac_broadcast_addr!(),
-            self.mac_address,
-            data,
-            EtherType::Arp
-        ).to_bytes()
-    );
+    pub fn send(&mut self, destination: MacAddress, data: Vec<u8>) {
+        let frame = EthernetFrame::new(destination, self.mac_address, data, EtherType::Arp);
+        self.port.borrow_mut().add_outgoing(&frame.to_bytes());
     }
 
     /// Returns a list of Ethernet frames that were received since the last call.
-    pub fn receive_frames(&mut self) -> Vec<EthernetFrame> {
+    pub fn receive(&mut self) -> Vec<EthernetFrame> {
         let bytes = self.port.borrow_mut().consume_incoming();
         if bytes.is_empty() {
             return vec![];

@@ -42,8 +42,7 @@ macro_rules! mac_addr {
     }};
 }
 
-/// Creates a generic ARP frame
-/// TODO: This is a hack for now. Need to implement a proper ARP frame.
+/// Creates a generic ethernet payload
 #[macro_export]
 macro_rules! ether_payload {
     ($value:expr) => {{
@@ -67,13 +66,13 @@ pub struct EthernetFrame {
 impl EthernetFrame {
     pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>, ether_type: EtherType) -> EthernetFrame {
         EthernetFrame {
-            preamble: [0x55; 7],            // 7 bytes of 0x55
-            start_frame_delimiter: 0xD5,    // 1 byte of 0xD5
+            preamble: [0x55; 7],
+            start_frame_delimiter: 0xD5,
             destination_address,
             source_address,
             ether_type,
             data,
-            frame_check_sequence: 0,
+            frame_check_sequence: 0,        // TODO: Calculate FCS
         }
     }
 
@@ -85,6 +84,10 @@ impl EthernetFrame {
     pub fn from_bytes(bytes: &Vec<u8>) -> Result<EthernetFrame, std::io::Error>  {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
+        }
+
+        if bytes.len() > 1500 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Oversized Ethernet frame; Giant frame."));
         }
 
         // Ignore the preamble and start frame delimiter. Unnecessary for virtual simulation.
