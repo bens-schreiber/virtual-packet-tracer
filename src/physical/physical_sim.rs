@@ -3,13 +3,13 @@ use std::{cell::RefCell, rc::Rc};
 use super::ethernet_port::EthernetPort;
 
 /// Simulates the movement of data over a physical connection between EthernetPorts.
-pub struct PacketSimulator {
+pub struct PhysicalSimulator {
     ports: Vec<Rc<RefCell<EthernetPort>>>,
 }
 
-impl PacketSimulator {
-    pub fn new() -> PacketSimulator {
-        PacketSimulator {
+impl PhysicalSimulator {
+    pub fn new() -> PhysicalSimulator {
+        PhysicalSimulator {
             ports: Vec::new(),
         }
     }

@@ -1,5 +1,5 @@
 mod physical {
-    pub mod packet_sim;
+    pub mod physical_sim;
     pub mod ethernet_port;
 }
 
@@ -21,7 +21,7 @@ mod network {
 #[cfg(test)]
 mod tests {
     pub mod ethernet_tests;
-    pub mod packet_sim_tests;
+    pub mod physical_sim_tests;
     pub mod network_interface_tests;
     pub mod switch_tests;
 }

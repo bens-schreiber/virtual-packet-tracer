@@ -1,18 +1,20 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, physical::physical_sim::PhysicalSimulator};
 
 #[test]
-fn PacketSimulator_Tick_ConsumesAllOutgoing() {
+fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut uc_interface = EthernetInterface::new(mac_addr!(3));
 
-    sim.add_port(i1.port());
-    sim.add_port(i2.port());
-    sim.add_port(uc_interface.port());
+    sim.add_ports(vec![
+        i1.port(),
+        i2.port(),
+        uc_interface.port(),
+    ]);
 
     EthernetInterface::connect(&mut i1, &mut i2);
 

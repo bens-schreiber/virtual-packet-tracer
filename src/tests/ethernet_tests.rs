@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
 
 mod EthernetFrameTests {
     use super::*;
@@ -80,12 +80,14 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendUni_ReceivesFrame() {
         // Arrange
-        let mut sim = PacketSimulator::new();
+        let mut sim = PhysicalSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(i1.port());
-        sim.add_port(i2.port());
+        sim.add_ports(vec![
+            i1.port(),
+            i2.port(),
+        ]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -111,12 +113,14 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendBi_ReceivesFrames() {
         // Arrange
-        let mut sim = PacketSimulator::new();
+        let mut sim = PhysicalSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(i1.port());
-        sim.add_port(i2.port());
+        sim.add_ports(vec![
+            i1.port(),
+            i2.port(),
+        ]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -151,12 +155,14 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendUniMult_ReceivesAllData() {
             // Arrange
-            let mut sim = PacketSimulator::new();
+            let mut sim = PhysicalSimulator::new();
             let mut i1 = EthernetInterface::new(mac_addr!(1));
             let mut i2 = EthernetInterface::new(mac_addr!(2));
         
-            sim.add_port(i1.port());
-            sim.add_port(i2.port());
+            sim.add_ports(vec![
+                i1.port(),
+                i2.port(),
+            ]);
         
             EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -177,12 +183,14 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendBiMult_ReceivesAllData() {
         // Arrange
-        let mut sim = PacketSimulator::new();
+        let mut sim = PhysicalSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(i1.port());
-        sim.add_port(i2.port());
+        sim.add_ports(vec![
+            i1.port(),
+            i2.port(),
+        ]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 

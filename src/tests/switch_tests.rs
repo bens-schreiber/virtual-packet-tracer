@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
 
 #[test]
 pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));
@@ -54,7 +54,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
 #[test]
 pub fn Switch_ReceiveInTable_ForwardsFrame() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));
@@ -104,7 +104,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 #[test]
 fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));

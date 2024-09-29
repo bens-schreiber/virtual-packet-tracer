@@ -1,16 +1,18 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::physical_sim::PhysicalSimulator};
 
 #[test]
 fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_port(i1.ethernet.port());
-    sim.add_port(i2.ethernet.port());
+    sim.add_ports(vec![
+        i1.ethernet.port(),
+        i2.ethernet.port(),
+    ]);
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
@@ -44,12 +46,14 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
 #[test]
 fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_port(i1.ethernet.port());
-    sim.add_port(i2.ethernet.port());
+    sim.add_ports(vec![
+        i1.ethernet.port(),
+        i2.ethernet.port(),
+    ]);
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
@@ -83,12 +87,14 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
 #[test]
 fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
     // Arrange
-    let mut sim = PacketSimulator::new();
+    let mut sim = PhysicalSimulator::new();
     let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_port(i1.ethernet.port());
-    sim.add_port(i2.ethernet.port());
+    sim.add_ports(vec![
+        i1.ethernet.port(),
+        i2.ethernet.port(),
+    ]);
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
