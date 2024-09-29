@@ -3,6 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{mac_addr, mac_broadcast_addr, network::ipv4::Ipv4Address, physical::ethernet_port::EthernetPort};
 use super::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{EtherType, EthernetFrame, MacAddress}};
 
+#[derive(Debug, Clone)]
 pub struct EthernetInterface {
     port: Rc<RefCell<EthernetPort>>,
     mac_address: MacAddress,
@@ -25,7 +26,7 @@ impl EthernetInterface {
     }
 
     /// Connects two EthernetInterfaces together via EthernetPorts (bi-directional).
-    pub fn connect_port(&mut self, other: &mut EthernetInterface) {
+    pub fn connect(&mut self, other: &mut EthernetInterface) {
         EthernetPort::connect_ports(self.port.clone(), other.port.clone());
     }
 
@@ -39,7 +40,7 @@ impl EthernetInterface {
             target,
         ).to_bytes();
 
-        self.send(mac_broadcast_addr!(), EtherType::Arp, arp);
+        self.send(mac_broadcast_addr!(), EtherType::Arp, &arp);
     }
 
     /// Sends an ARP reply; respond to an ARP request.
@@ -52,15 +53,22 @@ impl EthernetInterface {
             target,
         ).to_bytes();
 
-        self.send(mac_broadcast_addr!(), EtherType::Arp, arp);
+        self.send(mac_broadcast_addr!(), EtherType::Arp, &arp);
     }
 
-    /// Sends data as an EthernetFrame.
+    /// Sends data as an EthernetFrame from this interface to the destination MAC address.
     /// 
-    /// NOTE: The data is not sent immediately. It is added to the outgoing buffer. Simulator must be ticked to send the data.
-    pub fn send(&mut self, destination: MacAddress, ether_type: EtherType, data: Vec<u8>) {
-        let frame = EthernetFrame::new(destination, self.mac_address, data, ether_type);
+    /// The source MAC address is variable.
+    pub fn sends(&mut self, source: MacAddress, destination: MacAddress, ether_type: EtherType, data: &Vec<u8>) {
+        let frame = EthernetFrame::new(destination, source, data.clone(), ether_type);
         self.port.borrow_mut().add_outgoing(&frame.to_bytes());
+    }
+
+    /// Sends data as an EthernetFrame from this interface to the destination MAC address.
+    /// 
+    /// The source MAC address is this interface's MAC address.
+    pub fn send(&mut self, destination: MacAddress, ether_type: EtherType, data: &Vec<u8>) {
+        self.sends(self.mac_address, destination, ether_type, data);
     }
 
     /// Returns a list of Ethernet frames that were received since the last call.

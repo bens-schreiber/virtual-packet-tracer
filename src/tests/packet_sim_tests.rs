@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, physical::packet_sim::PacketSimulator};
 
 #[test]
 fn PacketSimulator_Tick_ConsumesAllOutgoing() {
@@ -14,11 +14,11 @@ fn PacketSimulator_Tick_ConsumesAllOutgoing() {
     sim.add_port(interface2.port());
     sim.add_port(uc_interface.port());
 
-    EthernetInterface::connect_port(&mut interface1, &mut interface2);
+    EthernetInterface::connect(&mut interface1, &mut interface2);
 
-    interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(1));
-    interface2.send(mac_addr!(0), EtherType::Debug, ether_payload!(2));
-    uc_interface.send(mac_addr!(0), EtherType::Debug, ether_payload!(3));
+    interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+    interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+    uc_interface.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
 
     // Act
     sim.tick();

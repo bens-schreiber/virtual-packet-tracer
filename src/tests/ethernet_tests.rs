@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
 
 mod EthernetFrameTests {
     use super::*;
@@ -13,7 +13,7 @@ mod EthernetFrameTests {
         let ethernet_frame = EthernetFrame::new(
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
-            ether_payload!(1),
+            ether_payload(1),
             EtherType::Debug
         );
 
@@ -37,7 +37,7 @@ mod EthernetFrameTests {
         }
 
         assert_eq!(bytes[20..22], [0xFF, 0xFF]); // EtherType
-        assert_eq!(bytes[22..50], ether_payload!(1)); // Data
+        assert_eq!(bytes[22..50], ether_payload(1)); // Data
         assert_eq!(bytes[50..54], [0x00, 0x00, 0x00, 0x00]); // Frame Check Sequence
     }
 
@@ -47,7 +47,7 @@ mod EthernetFrameTests {
         let ethernet_frame = EthernetFrame::new(
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
-            ether_payload!(1),
+            ether_payload(1),
             EtherType::Debug
         );
 
@@ -87,10 +87,10 @@ mod EthernetInterfaceTests {
         sim.add_port(interface1.port());
         sim.add_port(interface2.port());
 
-        EthernetInterface::connect_port(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut interface1, &mut interface2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(1));
+        interface1.send(mac_addr!(0), EtherType::Debug, &&ether_payload(1));
         sim.tick();
 
         let received_data1 = interface1.receive();
@@ -103,7 +103,7 @@ mod EthernetInterfaceTests {
         assert_eq!(received_data2[0], EthernetFrame::new(
             mac_addr!(0),
             interface1.mac_address(),
-            ether_payload!(1),
+            ether_payload(1),
             EtherType::Debug
         ));
     }
@@ -118,11 +118,11 @@ mod EthernetInterfaceTests {
         sim.add_port(interface1.port());
         sim.add_port(interface2.port());
 
-        EthernetInterface::connect_port(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut interface1, &mut interface2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(1));
-        interface2.send(mac_addr!(0), EtherType::Debug, ether_payload!(2));
+        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
         sim.tick();
 
         let received_data1 = interface1.receive();
@@ -135,14 +135,14 @@ mod EthernetInterfaceTests {
         assert_eq!(received_data1[0], EthernetFrame::new(
             mac_addr!(0),
             interface2.mac_address(),
-            ether_payload!(2),
+            ether_payload(2),
             EtherType::Debug
         ));
 
         assert_eq!(received_data2[0], EthernetFrame::new(
             mac_addr!(0),
             interface1.mac_address(),
-            ether_payload!(1),
+            ether_payload(1),
             EtherType::Debug
         ));
 
@@ -158,20 +158,20 @@ mod EthernetInterfaceTests {
             sim.add_port(interface1.port());
             sim.add_port(interface2.port());
         
-            EthernetInterface::connect_port(&mut interface1, &mut interface2);
+            EthernetInterface::connect(&mut interface1, &mut interface2);
 
             // Act
-            interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(1));
-            interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(2));
-            interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(3));
+            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
             sim.tick();
             let received_data = interface2.receive();
 
             // Assert
             assert!(received_data.len() == 3);
-            assert_eq!(*received_data[0].data(), ether_payload!(1));
-            assert_eq!(*received_data[1].data(), ether_payload!(2));
-            assert_eq!(*received_data[2].data(), ether_payload!(3));
+            assert_eq!(*received_data[0].data(), ether_payload(1));
+            assert_eq!(*received_data[1].data(), ether_payload(2));
+            assert_eq!(*received_data[2].data(), ether_payload(3));
     }
 
     #[test]
@@ -184,16 +184,16 @@ mod EthernetInterfaceTests {
         sim.add_port(interface1.port());
         sim.add_port(interface2.port());
 
-        EthernetInterface::connect_port(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut interface1, &mut interface2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(1));
-        interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(2));
-        interface1.send(mac_addr!(0), EtherType::Debug, ether_payload!(3));
+        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
         
-        interface2.send(mac_addr!(0), EtherType::Debug, ether_payload!(4));
-        interface2.send(mac_addr!(0), EtherType::Debug, ether_payload!(5));
-        interface2.send(mac_addr!(0), EtherType::Debug, ether_payload!(6));
+        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(4));
+        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(5));
+        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(6));
         sim.tick();
         let received_data1 = interface1.receive();
         let received_data2 = interface2.receive();
@@ -202,12 +202,12 @@ mod EthernetInterfaceTests {
         assert!(received_data1.len() == 3);
         assert!(received_data2.len() == 3);
 
-        assert_eq!(*received_data1[0].data(), ether_payload!(4));
-        assert_eq!(*received_data1[1].data(), ether_payload!(5));
-        assert_eq!(*received_data1[2].data(), ether_payload!(6));
+        assert_eq!(*received_data1[0].data(), ether_payload(4));
+        assert_eq!(*received_data1[1].data(), ether_payload(5));
+        assert_eq!(*received_data1[2].data(), ether_payload(6));
 
-        assert_eq!(*received_data2[0].data(), ether_payload!(1));
-        assert_eq!(*received_data2[1].data(), ether_payload!(2));
-        assert_eq!(*received_data2[2].data(), ether_payload!(3));
+        assert_eq!(*received_data2[0].data(), ether_payload(1));
+        assert_eq!(*received_data2[1].data(), ether_payload(2));
+        assert_eq!(*received_data2[2].data(), ether_payload(3));
     }
 }

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, ether_payload, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::packet_sim::PacketSimulator};
 
 #[test]
 fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
@@ -12,10 +12,10 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
     sim.add_port(interface1.ethernet.port());
     sim.add_port(interface2.ethernet.port());
 
-    EthernetInterface::connect_port(&mut interface1.ethernet, &mut interface2.ethernet);
+    EthernetInterface::connect(&mut interface1.ethernet, &mut interface2.ethernet);
 
     // Act
-    let result = interface1.send(interface2.ip_address(), ether_payload!(1));
+    let result = interface1.send(interface2.ip_address(), &ether_payload(1));
     sim.tick();
 
     let received_data1 = interface1.ethernet.receive();
@@ -51,10 +51,10 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
     sim.add_port(interface1.ethernet.port());
     sim.add_port(interface2.ethernet.port());
 
-    EthernetInterface::connect_port(&mut interface1.ethernet, &mut interface2.ethernet);
+    EthernetInterface::connect(&mut interface1.ethernet, &mut interface2.ethernet);
 
     // Act
-    interface1.send(interface2.ip_address(), ether_payload!(1));   // Fails, sends ARP request
+    interface1.send(interface2.ip_address(), &ether_payload(1));   // Fails, sends ARP request
     sim.tick();
     
     interface2.receive(); // Sends ARP reply
@@ -90,16 +90,16 @@ fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
     sim.add_port(interface1.ethernet.port());
     sim.add_port(interface2.ethernet.port());
 
-    EthernetInterface::connect_port(&mut interface1.ethernet, &mut interface2.ethernet);
+    EthernetInterface::connect(&mut interface1.ethernet, &mut interface2.ethernet);
 
-    interface1.send(interface2.ip_address(), ether_payload!(1));   // Fails, sends ARP request
+    interface1.send(interface2.ip_address(), &ether_payload(1));   // Fails, sends ARP request
     sim.tick();
     interface2.receive(); // Sends ARP reply
     sim.tick();
     interface1.receive(); // Process ARP reply
 
     // Act
-    let result = interface1.send(interface2.ip_address(), ether_payload!(1));  // Sends Ipv4 frame
+    let result = interface1.send(interface2.ip_address(), &ether_payload(1));  // Sends Ipv4 frame
     sim.tick();
 
     let received_data = interface2.receive();
@@ -110,8 +110,6 @@ fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
     assert_eq!(received_data[0], Ipv4Frame::new(
         interface1.ip_address(),
         interface2.ip_address(),
-        ether_payload!(1)
+        ether_payload(1)
     ));
-
-
 }

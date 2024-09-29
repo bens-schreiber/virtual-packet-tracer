@@ -4,6 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 /// 
 /// This simulated port uses the idea of an Interpacket Gap (IPG) to prepare between frames for transmission
 /// (represented by the Vec<Vec<u8>>, each Vec<u8> is a frame, able to be individually received because of the IPG).
+#[derive(Debug, Clone)]
 pub struct EthernetPort {
 
     /// Incoming bytes from the physical connection

@@ -1,5 +1,5 @@
 #[repr(u16)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 /// An Ethernet II frame type
 pub enum EtherType {
     Ipv4 = 0x0800,
@@ -45,21 +45,17 @@ macro_rules! mac_addr {
 }
 
 /// Creates a generic ethernet payload
-#[macro_export]
-macro_rules! ether_payload {
-    ($value:expr) => {{
-        let data = vec![$value; 28]; // Create a 28-byte array filled with the given value
-        data
-    }};
+pub fn ether_payload(value: u8) -> Vec<u8> {
+    vec![value; 28]
 }
 
 /// Ethernet II frame format
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct EthernetFrame {
     preamble: [u8; 7],
     start_frame_delimiter: u8,
-    destination_address: MacAddress,
-    source_address: MacAddress,
+    pub destination_address: MacAddress,
+    pub source_address: MacAddress,
     pub ether_type: EtherType,
     data: Vec<u8>,
     frame_check_sequence: u32,

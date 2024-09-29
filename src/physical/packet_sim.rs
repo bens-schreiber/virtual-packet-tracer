@@ -18,6 +18,12 @@ impl PacketSimulator {
         self.ports.push(port);
     }
 
+    pub fn add_ports(&mut self, ports: Vec<Rc<RefCell<EthernetPort>>>) {
+        for port in ports {
+            self.add_port(port);
+        }
+    }
+
     pub fn tick(&mut self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();

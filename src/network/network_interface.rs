@@ -30,12 +30,12 @@ impl NetworkInterface {
     /// Returns true if the data was sent successfully.
     /// 
     /// Returns false if the MAC address of the destination IP address is not in the ARP table.
-    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
+    pub fn send(&mut self, destination: Ipv4Address, data: &Vec<u8>) -> bool {
         if let Some(mac_address) = self.arp_table.get(&destination) {
 
-            let bytes = Ipv4Frame::new(self.ip_address, destination, data).to_bytes();
+            let bytes = Ipv4Frame::new(self.ip_address, destination, data.clone()).to_bytes();
             
-            self.ethernet.send(*mac_address, EtherType::Ipv4, bytes);
+            self.ethernet.send(*mac_address, EtherType::Ipv4, &bytes);
             return true;
         }
 
