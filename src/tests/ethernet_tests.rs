@@ -68,41 +68,41 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_Receive_ReturnsEmptyVecWhenNoData() {
         // Arrange
-        let mut interface = EthernetInterface::new(mac_addr!(1));
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
     
         // Act
-        let result = interface.receive();
+        let i1_data = i1.receive();
     
         // Assert
-        assert!(result.is_empty());
+        assert!(i1_data.is_empty());
     }
 
     #[test]
     fn EthernetInterface_SendUni_ReceivesFrame() {
         // Arrange
         let mut sim = PacketSimulator::new();
-        let mut interface1 = EthernetInterface::new(mac_addr!(1));
-        let mut interface2 = EthernetInterface::new(mac_addr!(2));
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+        let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(interface1.port());
-        sim.add_port(interface2.port());
+        sim.add_port(i1.port());
+        sim.add_port(i2.port());
 
-        EthernetInterface::connect(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut i1, &mut i2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, &&ether_payload(1));
+        i1.send(mac_addr!(0), EtherType::Debug, &&ether_payload(1));
         sim.tick();
 
-        let received_data1 = interface1.receive();
-        let received_data2 = interface2.receive();
+        let i1_data = i1.receive();
+        let i2_data = i2.receive();
 
         // Assert
-        assert!(received_data1.is_empty());
-        assert!(received_data2.len() == 1);
+        assert!(i1_data.is_empty());
+        assert!(i2_data.len() == 1);
 
-        assert_eq!(received_data2[0], EthernetFrame::new(
+        assert_eq!(i2_data[0], EthernetFrame::new(
             mac_addr!(0),
-            interface1.mac_address(),
+            i1.mac_address(),
             ether_payload(1),
             EtherType::Debug
         ));
@@ -112,36 +112,36 @@ mod EthernetInterfaceTests {
     fn EthernetInterface_SendBi_ReceivesFrames() {
         // Arrange
         let mut sim = PacketSimulator::new();
-        let mut interface1 = EthernetInterface::new(mac_addr!(1));
-        let mut interface2 = EthernetInterface::new(mac_addr!(2));
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+        let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(interface1.port());
-        sim.add_port(interface2.port());
+        sim.add_port(i1.port());
+        sim.add_port(i2.port());
 
-        EthernetInterface::connect(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut i1, &mut i2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
-        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+        i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+        i2.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
         sim.tick();
 
-        let received_data1 = interface1.receive();
-        let received_data2 = interface2.receive();
+        let i1_data = i1.receive();
+        let i2_data = i2.receive();
 
         // Assert
-        assert!(received_data1.len() == 1);
-        assert!(received_data2.len() == 1);
+        assert!(i1_data.len() == 1);
+        assert!(i2_data.len() == 1);
 
-        assert_eq!(received_data1[0], EthernetFrame::new(
+        assert_eq!(i1_data[0], EthernetFrame::new(
             mac_addr!(0),
-            interface2.mac_address(),
+            i2.mac_address(),
             ether_payload(2),
             EtherType::Debug
         ));
 
-        assert_eq!(received_data2[0], EthernetFrame::new(
+        assert_eq!(i2_data[0], EthernetFrame::new(
             mac_addr!(0),
-            interface1.mac_address(),
+            i1.mac_address(),
             ether_payload(1),
             EtherType::Debug
         ));
@@ -152,20 +152,20 @@ mod EthernetInterfaceTests {
     fn EthernetInterface_SendUniMult_ReceivesAllData() {
             // Arrange
             let mut sim = PacketSimulator::new();
-            let mut interface1 = EthernetInterface::new(mac_addr!(1));
-            let mut interface2 = EthernetInterface::new(mac_addr!(2));
+            let mut i1 = EthernetInterface::new(mac_addr!(1));
+            let mut i2 = EthernetInterface::new(mac_addr!(2));
         
-            sim.add_port(interface1.port());
-            sim.add_port(interface2.port());
+            sim.add_port(i1.port());
+            sim.add_port(i2.port());
         
-            EthernetInterface::connect(&mut interface1, &mut interface2);
+            EthernetInterface::connect(&mut i1, &mut i2);
 
             // Act
-            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
-            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
-            interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
+            i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+            i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+            i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
             sim.tick();
-            let received_data = interface2.receive();
+            let received_data = i2.receive();
 
             // Assert
             assert!(received_data.len() == 3);
@@ -178,36 +178,36 @@ mod EthernetInterfaceTests {
     fn EthernetInterface_SendBiMult_ReceivesAllData() {
         // Arrange
         let mut sim = PacketSimulator::new();
-        let mut interface1 = EthernetInterface::new(mac_addr!(1));
-        let mut interface2 = EthernetInterface::new(mac_addr!(2));
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+        let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.add_port(interface1.port());
-        sim.add_port(interface2.port());
+        sim.add_port(i1.port());
+        sim.add_port(i2.port());
 
-        EthernetInterface::connect(&mut interface1, &mut interface2);
+        EthernetInterface::connect(&mut i1, &mut i2);
 
         // Act
-        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
-        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
-        interface1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
+        i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(1));
+        i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(2));
+        i1.send(mac_addr!(0), EtherType::Debug, &ether_payload(3));
         
-        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(4));
-        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(5));
-        interface2.send(mac_addr!(0), EtherType::Debug, &ether_payload(6));
+        i2.send(mac_addr!(0), EtherType::Debug, &ether_payload(4));
+        i2.send(mac_addr!(0), EtherType::Debug, &ether_payload(5));
+        i2.send(mac_addr!(0), EtherType::Debug, &ether_payload(6));
         sim.tick();
-        let received_data1 = interface1.receive();
-        let received_data2 = interface2.receive();
+        let i1_data = i1.receive();
+        let i2_data = i2.receive();
 
         // Assert
-        assert!(received_data1.len() == 3);
-        assert!(received_data2.len() == 3);
+        assert!(i1_data.len() == 3);
+        assert!(i2_data.len() == 3);
 
-        assert_eq!(*received_data1[0].data(), ether_payload(4));
-        assert_eq!(*received_data1[1].data(), ether_payload(5));
-        assert_eq!(*received_data1[2].data(), ether_payload(6));
+        assert_eq!(*i1_data[0].data(), ether_payload(4));
+        assert_eq!(*i1_data[1].data(), ether_payload(5));
+        assert_eq!(*i1_data[2].data(), ether_payload(6));
 
-        assert_eq!(*received_data2[0].data(), ether_payload(1));
-        assert_eq!(*received_data2[1].data(), ether_payload(2));
-        assert_eq!(*received_data2[2].data(), ether_payload(3));
+        assert_eq!(*i2_data[0].data(), ether_payload(1));
+        assert_eq!(*i2_data[1].data(), ether_payload(2));
+        assert_eq!(*i2_data[2].data(), ether_payload(3));
     }
 }
