@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{data_link::{ethernet_frame::MacAddress, ethernet_interface::EthernetInterface}, mac_addr, physical::ethernet_port::EthernetPort};
+use crate::{data_link::{ethernet_frame::MacAddress, ethernet_interface::EthernetInterface}, mac_addr, mac_broadcast_addr, physical::ethernet_port::EthernetPort};
 
 /// A layer two switch that simply forwards Ethernet frames to the correct interface.
 /// 
@@ -42,6 +42,11 @@ impl Switch {
             }
 
             for f in frames {
+
+                // A source address can never be the broadcast address.
+                if f.source_address == mac_broadcast_addr!() {
+                    continue; // Discard 
+                }
 
                 // If the sender MAC address is not in the table, add it.
                 if !self.table.contains_key(&f.source_address) {

@@ -1,50 +1,50 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, mac_addr, physical::packet_sim::PacketSimulator};
+use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::packet_sim::PacketSimulator};
 
 #[test]
 pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     // Arrange
     let mut sim = PacketSimulator::new();
-    let mut interface1 = EthernetInterface::new(mac_addr!(1));
-    let mut interface2 = EthernetInterface::new(mac_addr!(2));
-    let mut interface3 = EthernetInterface::new(mac_addr!(3));
+    let mut i1 = EthernetInterface::new(mac_addr!(1));
+    let mut i2 = EthernetInterface::new(mac_addr!(2));
+    let mut i3 = EthernetInterface::new(mac_addr!(3));
     let mut switch = Switch::from_seed(4);
 
-    switch.connect(0, &mut interface1);
-    switch.connect(1, &mut interface2);
-    switch.connect(2, &mut interface3);
+    switch.connect(0, &mut i1);
+    switch.connect(1, &mut i2);
+    switch.connect(2, &mut i3);
 
     sim.add_ports(vec![
-        interface1.port(),
-        interface2.port(),
-        interface3.port(),
+        i1.port(),
+        i2.port(),
+        i3.port(),
     ]);
 
     sim.add_ports(switch.ports());
 
     // Act
-    interface1.send(interface2.mac_address(), EtherType::Debug, &ether_payload(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &ether_payload(1));
     sim.tick();
     switch.receive();
     sim.tick();
 
-    let received_data2 = interface2.receive();
-    let received_data3 = interface3.receive();
+    let i2_data = i2.receive();
+    let received_data3 = i3.receive();
 
     // Assert
-    assert!(received_data2.len() == 1);
-    assert_eq!(received_data2[0], EthernetFrame::new(
-        interface2.mac_address(),
-        interface1.mac_address(),
+    assert!(i2_data.len() == 1);
+    assert_eq!(i2_data[0], EthernetFrame::new(
+        i2.mac_address(),
+        i1.mac_address(),
         ether_payload(1),
         EtherType::Debug
     ));
 
     assert!(received_data3.len() == 1);
     assert_eq!(received_data3[0], EthernetFrame::new(
-        interface2.mac_address(),
-        interface1.mac_address(),
+        i2.mac_address(),
+        i1.mac_address(),
         ether_payload(1),
         EtherType::Debug
     ));
@@ -55,48 +55,114 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
 pub fn Switch_ReceiveInTable_ForwardsFrame() {
     // Arrange
     let mut sim = PacketSimulator::new();
-    let mut interface1 = EthernetInterface::new(mac_addr!(1));
-    let mut interface2 = EthernetInterface::new(mac_addr!(2));
-    let mut interface3 = EthernetInterface::new(mac_addr!(3));
+    let mut i1 = EthernetInterface::new(mac_addr!(1));
+    let mut i2 = EthernetInterface::new(mac_addr!(2));
+    let mut i3 = EthernetInterface::new(mac_addr!(3));
     let mut switch = Switch::from_seed(4);
 
-    switch.connect(0, &mut interface1);
-    switch.connect(1, &mut interface2);
-    switch.connect(2, &mut interface3);
+    switch.connect(0, &mut i1);
+    switch.connect(1, &mut i2);
+    switch.connect(2, &mut i3);
 
     sim.add_ports(vec![
-        interface1.port(),
-        interface2.port(),
-        interface3.port(),
+        i1.port(),
+        i2.port(),
+        i3.port(),
     ]);
 
     sim.add_ports(switch.ports());
 
-    interface1.send(interface2.mac_address(), EtherType::Debug, &ether_payload(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &ether_payload(1));
     sim.tick();
-    switch.receive();       // Switch learns MAC address of interface1
+    switch.receive();       // Switch learns MAC address of i1
     sim.tick();
-    interface2.receive();   // dump incoming data
-    interface3.receive();   // dump incoming data
+    i2.receive();   // dump incoming data
+    i3.receive();   // dump incoming data
 
     // Act
-    interface2.send(interface1.mac_address(), EtherType::Debug, &ether_payload(1));
+    i2.send(i1.mac_address(), EtherType::Debug, &ether_payload(1));
     sim.tick();
     switch.receive();
     sim.tick();
 
-    let received_data1 = interface1.receive();
-    let received_data3 = interface3.receive();
+    let i1_data = i1.receive();
+    let received_data3 = i3.receive();
 
     // Assert
-    assert!(received_data1.len() == 1);
-    assert_eq!(received_data1[0], EthernetFrame::new(
-        interface1.mac_address(),
-        interface2.mac_address(),
+    assert!(i1_data.len() == 1);
+    assert_eq!(i1_data[0], EthernetFrame::new(
+        i1.mac_address(),
+        i2.mac_address(),
         ether_payload(1),
         EtherType::Debug
     ));
 
     assert!(received_data3.is_empty());
 
+}
+
+#[test]
+fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
+    // Arrange
+    let mut sim = PacketSimulator::new();
+    let mut i1 = EthernetInterface::new(mac_addr!(1));
+    let mut i2 = EthernetInterface::new(mac_addr!(2));
+    let mut i3 = EthernetInterface::new(mac_addr!(3));
+    let mut switch = Switch::from_seed(4);
+
+    switch.connect(0, &mut i1);
+    switch.connect(1, &mut i2);
+    switch.connect(2, &mut i3);
+
+    sim.add_ports(vec![
+        i1.port(),
+        i2.port(),
+        i3.port(),
+    ]);
+
+    sim.add_ports(switch.ports());
+
+    // Act
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &ether_payload(1)); // Send broadcast
+    sim.tick();
+    switch.receive();
+    sim.tick();
+
+    let i2_data = i2.receive(); // Receive broadcast
+    let i3_data = i3.receive(); // Receive broadcast
+
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &ether_payload(2)); // Send broadcast
+    sim.tick();
+    switch.receive();
+    sim.tick();
+
+    let i2_data2 = i2.receive(); // Receive broadcast
+    let i3_data2 = i3.receive(); // Receive broadcast
+
+    // Assert
+    let frame1 = EthernetFrame::new(
+        mac_broadcast_addr!(),
+        i1.mac_address(),
+        ether_payload(1),
+        EtherType::Debug
+    );
+
+    assert!(i2_data.len() == 1);
+    assert_eq!(i2_data[0], frame1);
+
+    assert!(i3_data.len() == 1);
+    assert_eq!(i3_data[0], frame1);
+
+    let frame2 = EthernetFrame::new(
+        mac_broadcast_addr!(),
+        i1.mac_address(),
+        ether_payload(2),
+        EtherType::Debug
+    );
+
+    assert!(i2_data2.len() == 1);
+    assert_eq!(i2_data2[0], frame2);
+
+    assert!(i3_data2.len() == 1);
+    assert_eq!(i3_data2[0], frame2);
 }
