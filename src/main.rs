@@ -15,14 +15,14 @@ mod data_link {
 
 mod network {
     pub mod ipv4;
-    pub mod network_interface;
+    pub mod ipv4_interface;
 }
 
 #[cfg(test)]
 mod tests {
     pub mod ethernet_tests;
     pub mod physical_sim_tests;
-    pub mod network_interface_tests;
+    pub mod ipv4_interface_tests;
     pub mod switch_tests;
 }
 

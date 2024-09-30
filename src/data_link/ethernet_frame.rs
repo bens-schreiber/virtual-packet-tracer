@@ -44,9 +44,13 @@ macro_rules! mac_addr {
     }};
 }
 
-/// Creates a generic ethernet payload
-pub fn ether_payload(value: u8) -> Vec<u8> {
-    vec![value; 28]
+/// Creates a generic ethernet payload with a given value
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! eth_data {
+    ($value:expr) => {{
+        vec![$value; 28]
+    }};
 }
 
 /// Ethernet II frame format

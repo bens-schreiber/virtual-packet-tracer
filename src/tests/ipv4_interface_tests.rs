@@ -1,15 +1,15 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, network_interface::NetworkInterface}, physical::physical_sim::PhysicalSimulator};
+use crate::{data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::*, ethernet_interface::*}, eth_data, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, ipv4_interface::Ipv4Interface}, physical::physical_sim::PhysicalSimulator};
 
 #[test]
-fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
+fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpRequest() {
     // Arrange
     let mut sim = PhysicalSimulator::new();
-    let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.ethernet.port(),
         i2.ethernet.port(),
     ]);
@@ -17,7 +17,7 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
     // Act
-    let i1_sent = i1.send(i2.ip_address(), &ether_payload(1));
+    let i1_sent = i1.send(i2.ip_address(), &eth_data!(1));
     sim.tick();
 
     let i1_data = i1.ethernet.receive();
@@ -44,13 +44,13 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpRequest() {
 }
 
 #[test]
-fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
+fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpReply() {
     // Arrange
     let mut sim = PhysicalSimulator::new();
-    let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.ethernet.port(),
         i2.ethernet.port(),
     ]);
@@ -58,7 +58,7 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
     // Act
-    i1.send(i2.ip_address(), &ether_payload(1));   // Fails, sends ARP request
+    i1.send(i2.ip_address(), &eth_data!(1));   // Fails, sends ARP request
     sim.tick();
     
     i2.receive(); // Sends ARP reply
@@ -85,27 +85,27 @@ fn NetworkInterface_SendToUnknownIpV4_ReceiveArpReply() {
 }
 
 #[test]
-fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
+fn Ipv4Interface_SendUni_ReceivesIpv4Frame() {
     // Arrange
     let mut sim = PhysicalSimulator::new();
-    let mut i1 = NetworkInterface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = NetworkInterface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.ethernet.port(),
         i2.ethernet.port(),
     ]);
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
-    i1.send(i2.ip_address(), &ether_payload(1));   // Fails, sends ARP request
+    i1.send(i2.ip_address(), &eth_data!(1));   // Fails, sends ARP request
     sim.tick();
     i2.receive(); // Sends ARP reply
     sim.tick();
     i1.receive(); // Process ARP reply
 
     // Act
-    let i1_sent = i1.send(i2.ip_address(), &ether_payload(1));  // Sends Ipv4 frame
+    let i1_sent = i1.send(i2.ip_address(), &eth_data!(1));  // Sends Ipv4 frame
     sim.tick();
 
     let i2_data = i2.receive();
@@ -116,6 +116,6 @@ fn NetworkInterface_SendUni_ReceivesIpv4Frame() {
     assert_eq!(i2_data[0], Ipv4Frame::new(
         i1.ip_address(),
         i2.ip_address(),
-        ether_payload(1)
+        eth_data!(1)
     ));
 }

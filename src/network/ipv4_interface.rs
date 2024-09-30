@@ -4,15 +4,18 @@ use crate::data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{Eth
 use super::ipv4::{Ipv4Address, Ipv4Frame};
 
 
-pub struct NetworkInterface {
-    pub ethernet: EthernetInterface,
+/// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
+/// 
+/// Contains an ARP table to map IP addresses to MAC addresses.
+pub struct Ipv4Interface {
+    pub(crate) ethernet: EthernetInterface,
     ip_address: Ipv4Address,
     arp_table: HashMap<Ipv4Address, MacAddress>,
 }
 
-impl NetworkInterface {
-    pub fn new(mac_address: MacAddress, ip_address: Ipv4Address) -> NetworkInterface {
-        NetworkInterface {
+impl Ipv4Interface {
+    pub fn new(mac_address: MacAddress, ip_address: Ipv4Address) -> Ipv4Interface {
+        Ipv4Interface {
             ethernet: EthernetInterface::new(mac_address),
             ip_address,
             arp_table: HashMap::new()

@@ -14,20 +14,27 @@ impl PhysicalSimulator {
         }
     }
 
-    pub fn add_port(&mut self, port: Rc<RefCell<EthernetPort>>) {
+    /// Adds a port to the simulator.
+    pub fn add(&mut self, port: Rc<RefCell<EthernetPort>>) {
         self.ports.push(port);
     }
 
-    pub fn add_ports(&mut self, ports: Vec<Rc<RefCell<EthernetPort>>>) {
+    /// Adds multiple ports to the simulator.
+    pub fn adds(&mut self, ports: Vec<Rc<RefCell<EthernetPort>>>) {
         for port in ports {
-            self.add_port(port);
+            self.add(port);
         }
     }
 
+    /// Simulates the movement of data over the physical connection.
+    /// 
+    /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
+    /// 
+    /// All data in this simulation is moved in a single tick, thus the simulator is synchronous.
     pub fn tick(&mut self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
-            let connection = port.connection();
+            let connection = port.connection.clone();
 
             // Connection, so move the outgoing buffer to the other port's incoming buffer
             if let Some(connection) = connection {

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
+use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, eth_data, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
 
 #[test]
 pub fn Switch_ReceiveNotInTable_FloodsFrame() {
@@ -15,16 +15,16 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     switch.connect(1, &mut i2);
     switch.connect(2, &mut i3);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.port(),
         i2.port(),
         i3.port(),
     ]);
 
-    sim.add_ports(switch.ports());
+    sim.adds(switch.ports());
 
     // Act
-    i1.send(i2.mac_address(), EtherType::Debug, &ether_payload(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &eth_data!(1));
     sim.tick();
     switch.receive();
     sim.tick();
@@ -37,7 +37,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     assert_eq!(i2_data[0], EthernetFrame::new(
         i2.mac_address(),
         i1.mac_address(),
-        ether_payload(1),
+        eth_data!(1),
         EtherType::Debug
     ));
 
@@ -45,7 +45,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     assert_eq!(received_data3[0], EthernetFrame::new(
         i2.mac_address(),
         i1.mac_address(),
-        ether_payload(1),
+        eth_data!(1),
         EtherType::Debug
     ));
 
@@ -64,15 +64,15 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     switch.connect(1, &mut i2);
     switch.connect(2, &mut i3);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.port(),
         i2.port(),
         i3.port(),
     ]);
 
-    sim.add_ports(switch.ports());
+    sim.adds(switch.ports());
 
-    i1.send(i2.mac_address(), EtherType::Debug, &ether_payload(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &eth_data!(1));
     sim.tick();
     switch.receive();       // Switch learns MAC address of i1
     sim.tick();
@@ -80,7 +80,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     i3.receive();   // dump incoming data
 
     // Act
-    i2.send(i1.mac_address(), EtherType::Debug, &ether_payload(1));
+    i2.send(i1.mac_address(), EtherType::Debug, &eth_data!(1));
     sim.tick();
     switch.receive();
     sim.tick();
@@ -93,7 +93,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     assert_eq!(i1_data[0], EthernetFrame::new(
         i1.mac_address(),
         i2.mac_address(),
-        ether_payload(1),
+        eth_data!(1),
         EtherType::Debug
     ));
 
@@ -114,16 +114,16 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     switch.connect(1, &mut i2);
     switch.connect(2, &mut i3);
 
-    sim.add_ports(vec![
+    sim.adds(vec![
         i1.port(),
         i2.port(),
         i3.port(),
     ]);
 
-    sim.add_ports(switch.ports());
+    sim.adds(switch.ports());
 
     // Act
-    i1.send(mac_broadcast_addr!(), EtherType::Debug, &ether_payload(1)); // Send broadcast
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth_data!(1)); // Send broadcast
     sim.tick();
     switch.receive();
     sim.tick();
@@ -131,7 +131,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     let i2_data = i2.receive(); // Receive broadcast
     let i3_data = i3.receive(); // Receive broadcast
 
-    i1.send(mac_broadcast_addr!(), EtherType::Debug, &ether_payload(2)); // Send broadcast
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth_data!(2)); // Send broadcast
     sim.tick();
     switch.receive();
     sim.tick();
@@ -143,7 +143,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     let frame1 = EthernetFrame::new(
         mac_broadcast_addr!(),
         i1.mac_address(),
-        ether_payload(1),
+        eth_data!(1),
         EtherType::Debug
     );
 
@@ -156,7 +156,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     let frame2 = EthernetFrame::new(
         mac_broadcast_addr!(),
         i1.mac_address(),
-        ether_payload(2),
+        eth_data!(2),
         EtherType::Debug
     );
 

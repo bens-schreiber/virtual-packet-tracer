@@ -16,7 +16,7 @@ pub struct EthernetPort {
     outgoing_buffer: Vec<Vec<u8>>,
 
     /// None if a physical connection is not established
-    connection: Option<Rc<RefCell<EthernetPort>>>,
+    pub(super) connection: Option<Rc<RefCell<EthernetPort>>>,
 }
 
 impl EthernetPort {
@@ -29,18 +29,13 @@ impl EthernetPort {
     }
 
     /// Connects two ethernet ports together. This is a bi-directional connection.
-    pub fn connect_ports(port1: Rc<RefCell<EthernetPort>>, port2: Rc<RefCell<EthernetPort>>) {
+    pub fn connect(port1: Rc<RefCell<EthernetPort>>, port2: Rc<RefCell<EthernetPort>>) {
         port1.borrow_mut().connection = Some(port2.clone());
         port2.borrow_mut().connection = Some(port1.clone());
     }
 
-    /// Returns the connection if one exists.
-    pub fn connection(&self) -> Option<Rc<RefCell<EthernetPort>>> {
-        self.connection.clone()
-    }
-
     /// Appends the data to the outgoing buffer.
-    pub fn add_outgoing(&mut self, data: &Vec<u8>) {
+    pub fn send(&mut self, data: &Vec<u8>) {
         self.outgoing_buffer.push(data.clone());
     }
 
@@ -57,6 +52,8 @@ impl EthernetPort {
         incoming
     }
 
+    /// Returns true if there are bytes in the incoming buffer.
+    #[cfg(debug_assertions)]
     pub fn has_outgoing(&self) -> bool {
         !self.outgoing_buffer.is_empty()
     }
