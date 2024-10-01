@@ -14,7 +14,7 @@ pub struct Ethernet802_3Frame {
     dsap: u8,
     ssap: u8,
     control: u8,
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     frame_check_sequence: u32,
 }
 
@@ -33,13 +33,9 @@ impl Ethernet802_3Frame {
             frame_check_sequence: 0,        // TODO: Calculate FCS
         }
     }
-
-    pub fn data(&self) -> &Vec<u8> {
-        &self.data
-    }
     
     /// Creates an EthernetFrame from a byte array
-    pub fn from_bytes(bytes: &Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error>  {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error>  {
         if bytes.len() < 64 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
         }

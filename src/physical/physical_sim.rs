@@ -34,10 +34,9 @@ impl PhysicalSimulator {
     pub fn tick(&mut self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
-            let connection = port.connection.clone();
 
             // Connection, so move the outgoing buffer to the other port's incoming buffer
-            if let Some(connection) = connection {
+            if let Some(connection) = port.connection.clone() {
                 port.consume_outgoing(&mut connection.borrow_mut());
                 continue;
             }

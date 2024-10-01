@@ -34,12 +34,12 @@ impl Ipv4Interface {
     /// Returns true if the data was sent successfully.
     /// 
     /// Returns false if the MAC address of the destination IP address is not in the ARP table.
-    pub fn send(&mut self, destination: Ipv4Address, data: &Vec<u8>) -> bool {
+    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
         if let Some(mac_address) = self.arp_table.get(&destination) {
 
-            let bytes = Ipv4Frame::new(self.ip_address, destination, data.clone()).to_bytes();
+            let bytes = Ipv4Frame::new(self.ip_address, destination, data).to_bytes();
             
-            self.ethernet.send(*mac_address, EtherType::Ipv4, &bytes);
+            self.ethernet.send(*mac_address, EtherType::Ipv4, bytes);
             return true;
         }
 
@@ -63,7 +63,7 @@ impl Ipv4Interface {
             };
 
             if f.ether_type == EtherType::Ipv4 {
-                let ipv4_frame = match Ipv4Frame::from_bytes(f.data()) {
+                let ipv4_frame = match Ipv4Frame::from_bytes(f.data) {
                     Ok(ipv4_frame) => ipv4_frame,
                     Err(_) => continue  // Discard invalid Ipv4 frames
                 };
@@ -74,7 +74,7 @@ impl Ipv4Interface {
 
             if f.ether_type == EtherType::Arp {
                 
-                let arp_frame = match ArpFrame::from_bytes(f.data()) {
+                let arp_frame = match ArpFrame::from_bytes(f.data) {
                     Ok(arp_frame) => arp_frame,
                     Err(_) => continue  // Discard invalid ARP frames
                 };

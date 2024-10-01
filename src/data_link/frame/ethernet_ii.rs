@@ -29,7 +29,7 @@ pub struct Ethernet2Frame {
     pub destination_address: MacAddress,
     pub source_address: MacAddress,
     pub ether_type: EtherType,
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     frame_check_sequence: u32,
 }
 
@@ -46,12 +46,8 @@ impl Ethernet2Frame {
         }
     }
 
-    pub fn data(&self) -> &Vec<u8> {
-        &self.data
-    }
-    
     /// Creates an EthernetFrame from a byte array
-    pub fn from_bytes(bytes: &Vec<u8>) -> Result<Ethernet2Frame, std::io::Error>  {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet2Frame, std::io::Error>  {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
         }

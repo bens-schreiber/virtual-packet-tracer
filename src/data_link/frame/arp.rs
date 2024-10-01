@@ -65,7 +65,7 @@ impl ArpFrame {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<ArpFrame, &'static str> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<ArpFrame, &'static str> {
         if bytes.len() != 28 {
             return Err("ARP frame does not have 28 bytes");
         }
@@ -81,8 +81,8 @@ impl ArpFrame {
         let target_ip = bytes[24..28].try_into().unwrap();
 
         Ok(ArpFrame {
-            hardware_type: hardware_type,
-            protocol_type: protocol_type,
+            hardware_type,
+            protocol_type,
             hardware_size,
             protocol_size,
             opcode: opcode.into(),

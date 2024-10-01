@@ -104,14 +104,14 @@ impl Switch {
 
                 // If the destination MAC address is in the table, forward the mapped interface
                 if let Some(destination_index) = self.table.get(&f.destination_address) {
-                    self.ports[*destination_index].borrow_mut().interface.sendv(f.source_address, f.destination_address, f.ether_type, f.data());
+                    self.ports[*destination_index].borrow_mut().interface.sendv(f.source_address, f.destination_address, f.ether_type, f.data);
                 }
 
                 // Destination isn't in table, flood to all interfaces (except the one it came from)
                 else {
                     for (i, other_interface) in self.ports.iter().enumerate() {
                         if i != index {
-                            other_interface.borrow_mut().interface.sendv(f.source_address, f.destination_address, f.ether_type, f.data());
+                            other_interface.borrow_mut().interface.sendv(f.source_address, f.destination_address, f.ether_type, f.data.clone());
                         }
                     }
                 }

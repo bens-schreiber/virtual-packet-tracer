@@ -51,7 +51,7 @@ impl Ipv4Frame {
         bytes
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<Ipv4Frame, &'static str> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Ipv4Frame, &'static str> {
         if bytes.len() < 20 {
             return Err("Ipv4 frame does not have 20 bytes");
         }

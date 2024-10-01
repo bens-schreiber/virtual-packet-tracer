@@ -29,22 +29,22 @@ impl EthernetPort {
     }
 
     /// Connects two ethernet ports together. This is a bi-directional connection.
-    pub fn connect(port1: Rc<RefCell<EthernetPort>>, port2: Rc<RefCell<EthernetPort>>) {
+    pub fn connect(port1: &Rc<RefCell<EthernetPort>>, port2: &Rc<RefCell<EthernetPort>>) {
         port1.borrow_mut().connection = Some(port2.clone());
         port2.borrow_mut().connection = Some(port1.clone());
     }
 
     /// Appends the data to the outgoing buffer.
-    pub fn send(&mut self, data: &Vec<u8>) {
-        self.outgoing_buffer.push(data.clone());
+    pub fn send(&mut self, data: Vec<u8>) {
+        self.outgoing_buffer.push(data);
     }
 
-    /// Consumes the outgoing buffer and appends it to the other's incoming buffer.
-    pub fn consume_outgoing(&mut self, other: &mut EthernetPort) {
-        other.incoming_buffer.append(&mut self.outgoing_buffer);
+    /// Clears the outgoing buffer and appends it to the other's incoming buffer.
+    pub fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {
+        consumable.incoming_buffer.append(&mut self.outgoing_buffer);
     }
 
-    /// Consumes the incoming buffer and returns it.
+    /// Clears the incoming buffer and returns it.
     pub fn consume_incoming(&mut self) -> Vec<Vec<u8>> {
         let mut incoming = vec![];
         incoming.append(&mut self.incoming_buffer);
