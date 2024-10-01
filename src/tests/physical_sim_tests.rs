@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_frame::*, ethernet_interface::*}, eth_data, mac_addr, physical::physical_sim::PhysicalSimulator};
+use crate::{data_link::{ethernet_interface::EthernetInterface, frame::ethernet_ii::EtherType}, eth2_data, mac_addr, physical::physical_sim::PhysicalSimulator};
 
 #[test]
 fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
@@ -18,9 +18,9 @@ fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
 
     EthernetInterface::connect(&mut i1, &mut i2);
 
-    i1.send(mac_addr!(0), EtherType::Debug, &eth_data!(1));
-    i2.send(mac_addr!(0), EtherType::Debug, &eth_data!(2));
-    uc_interface.send(mac_addr!(0), EtherType::Debug, &&eth_data!(3));
+    i1.send(mac_addr!(0), EtherType::Debug, &eth2_data!(1));
+    i2.send(mac_addr!(0), EtherType::Debug, &eth2_data!(2));
+    uc_interface.send(mac_addr!(0), EtherType::Debug, &&eth2_data!(3));
 
     // Act
     sim.tick();

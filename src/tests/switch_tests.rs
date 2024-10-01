@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{device::switch::Switch, ethernet_frame::*, ethernet_interface::*}, eth_data, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
+use crate::{data_link::{device::switch::Switch, ethernet_interface::EthernetInterface, frame::ethernet_ii::{EtherType, Ethernet2Frame}}, eth2, eth2_data, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
 
 #[test]
 pub fn Switch_ReceiveNotInTable_FloodsFrame() {
@@ -24,7 +24,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     sim.adds(switch.ports());
 
     // Act
-    i1.send(i2.mac_address(), EtherType::Debug, &eth_data!(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &eth2_data!(1));
     sim.tick();
     switch.receive();
     sim.tick();
@@ -34,18 +34,18 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
 
     // Assert
     assert!(i2_data.len() == 1);
-    assert_eq!(i2_data[0], EthernetFrame::new(
+    assert_eq!(i2_data[0], eth2!(
         i2.mac_address(),
         i1.mac_address(),
-        eth_data!(1),
+        eth2_data!(1),
         EtherType::Debug
     ));
 
     assert!(received_data3.len() == 1);
-    assert_eq!(received_data3[0], EthernetFrame::new(
+    assert_eq!(received_data3[0], eth2!(
         i2.mac_address(),
         i1.mac_address(),
-        eth_data!(1),
+        eth2_data!(1),
         EtherType::Debug
     ));
 
@@ -72,7 +72,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 
     sim.adds(switch.ports());
 
-    i1.send(i2.mac_address(), EtherType::Debug, &eth_data!(1));
+    i1.send(i2.mac_address(), EtherType::Debug, &eth2_data!(1));
     sim.tick();
     switch.receive();       // Switch learns MAC address of i1
     sim.tick();
@@ -80,7 +80,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     i3.receive();   // dump incoming data
 
     // Act
-    i2.send(i1.mac_address(), EtherType::Debug, &eth_data!(1));
+    i2.send(i1.mac_address(), EtherType::Debug, &eth2_data!(1));
     sim.tick();
     switch.receive();
     sim.tick();
@@ -90,10 +90,10 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 
     // Assert
     assert!(i1_data.len() == 1);
-    assert_eq!(i1_data[0], EthernetFrame::new(
+    assert_eq!(i1_data[0], eth2!(
         i1.mac_address(),
         i2.mac_address(),
-        eth_data!(1),
+        eth2_data!(1),
         EtherType::Debug
     ));
 
@@ -123,7 +123,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     sim.adds(switch.ports());
 
     // Act
-    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth_data!(1)); // Send broadcast
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth2_data!(1)); // Send broadcast
     sim.tick();
     switch.receive();
     sim.tick();
@@ -131,7 +131,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     let i2_data = i2.receive(); // Receive broadcast
     let i3_data = i3.receive(); // Receive broadcast
 
-    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth_data!(2)); // Send broadcast
+    i1.send(mac_broadcast_addr!(), EtherType::Debug, &eth2_data!(2)); // Send broadcast
     sim.tick();
     switch.receive();
     sim.tick();
@@ -140,10 +140,10 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     let i3_data2 = i3.receive(); // Receive broadcast
 
     // Assert
-    let frame1 = EthernetFrame::new(
+    let frame1 = eth2!(
         mac_broadcast_addr!(),
         i1.mac_address(),
-        eth_data!(1),
+        eth2_data!(1),
         EtherType::Debug
     );
 
@@ -153,10 +153,10 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     assert!(i3_data.len() == 1);
     assert_eq!(i3_data[0], frame1);
 
-    let frame2 = EthernetFrame::new(
+    let frame2 = eth2!(
         mac_broadcast_addr!(),
         i1.mac_address(),
-        eth_data!(2),
+        eth2_data!(2),
         EtherType::Debug
     );
 

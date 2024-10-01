@@ -1,61 +1,29 @@
-#[repr(u16)]
-#[derive(Debug, PartialEq, Clone, Copy)]
-/// An Ethernet II frame type
-pub enum EtherType {
-    Ipv4 = 0x0800,
-    Arp = 0x0806,
-    Debug = 0xFFFF,
-}
+use crate::data_link::mac_address::MacAddress;
 
-impl From<u16> for EtherType {
-    fn from(item: u16) -> Self {
-        match item {
-            0x0800 => EtherType::Ipv4,
-            0x0806 => EtherType::Arp,
-            _ => EtherType::Debug,
-        }
-    }
-}
-
-/// A data link physical address
-pub type MacAddress = [u8; 6];
-
-/// Broadcast MAC address
+/// Creates a generic ethernet payload with a given value
+#[cfg(debug_assertions)]
 #[macro_export]
-macro_rules! mac_broadcast_addr {
-    () => {
-        [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
-    };
-}
-
-/// Creates a MAC address from a u64
-#[macro_export]
-macro_rules! mac_addr {
-    ($num:expr) => {{
-        let num = $num as u64;
-        [
-            ((num >> 40) & 0xff) as u8,
-            ((num >> 32) & 0xff) as u8,
-            ((num >> 24) & 0xff) as u8,
-            ((num >> 16) & 0xff) as u8,
-            ((num >> 8) & 0xff) as u8,
-            (num & 0xff) as u8,
-        ]
+macro_rules! eth2_data {
+    ($value:expr) => {{
+        vec![$value; 28]
     }};
 }
 
 /// Creates a generic ethernet payload with a given value
 #[cfg(debug_assertions)]
 #[macro_export]
-macro_rules! eth_data {
+macro_rules! eth802_3_data {
     ($value:expr) => {{
-        vec![$value; 28]
+        vec![$value; 46]
     }};
 }
 
 /// Ethernet II frame format
+/// 
+/// Used for all Ethernet frames except LLC frames
+/// 
 #[derive(Debug, PartialEq, Clone)]
-pub struct EthernetFrame {
+pub struct Ethernet2Frame {
     preamble: [u8; 7],
     start_frame_delimiter: u8,
     pub destination_address: MacAddress,
@@ -65,9 +33,9 @@ pub struct EthernetFrame {
     frame_check_sequence: u32,
 }
 
-impl EthernetFrame {
-    pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>, ether_type: EtherType) -> EthernetFrame {
-        EthernetFrame {
+impl Ethernet2Frame {
+    pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>, ether_type: EtherType) -> Ethernet2Frame {
+        Ethernet2Frame {
             preamble: [0x55; 7],
             start_frame_delimiter: 0xD5,
             destination_address,
@@ -83,7 +51,7 @@ impl EthernetFrame {
     }
     
     /// Creates an EthernetFrame from a byte array
-    pub fn from_bytes(bytes: &Vec<u8>) -> Result<EthernetFrame, std::io::Error>  {
+    pub fn from_bytes(bytes: &Vec<u8>) -> Result<Ethernet2Frame, std::io::Error>  {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
         }
@@ -105,7 +73,7 @@ impl EthernetFrame {
 
         let frame_check_sequence = u32::from_be_bytes([bytes[bytes.len()-4], bytes[bytes.len()-3], bytes[bytes.len()-2], bytes[bytes.len()-1]]);
 
-        Ok(EthernetFrame {
+        Ok(Ethernet2Frame {
             preamble,
             start_frame_delimiter,
             destination_address,
@@ -130,5 +98,23 @@ impl EthernetFrame {
         bytes.extend_from_slice(&self.frame_check_sequence.to_be_bytes());
 
         bytes
+    }
+}
+
+#[repr(u16)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum EtherType {
+    Ipv4 = 0x0800,
+    Arp = 0x0806,
+    Debug = 0xFFFF,
+}
+
+impl From<u16> for EtherType {
+    fn from(item: u16) -> Self {
+        match item {
+            0x0800 => EtherType::Ipv4,
+            0x0806 => EtherType::Arp,
+            _ => EtherType::Debug,
+        }
     }
 }

@@ -1,5 +1,4 @@
-use super::ethernet_frame::MacAddress;
-use crate::network::ipv4::Ipv4Address;
+use crate::{data_link::mac_address::MacAddress, network::ipv4::Ipv4Address};
 
 #[repr(u16)]
 #[derive(Copy, Clone, PartialEq)]

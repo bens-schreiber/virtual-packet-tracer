@@ -4,9 +4,15 @@ mod physical {
 }
 
 mod data_link {
-    pub mod ethernet_frame;
+    pub mod frame {
+        pub mod ethernet_ii;
+        pub mod ethernet_802_3;
+        pub mod arp;
+    }
+
     pub mod ethernet_interface;
-    pub mod arp_frame;
+
+    pub mod mac_address;
 
     pub mod device {
         pub mod switch;

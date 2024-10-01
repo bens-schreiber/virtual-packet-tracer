@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::data_link::{arp_frame::{ArpFrame, ArpOperation}, ethernet_frame::{EtherType, MacAddress}, ethernet_interface::EthernetInterface};
+use crate::data_link::{ethernet_interface::{EthernetFrame, EthernetInterface}, frame::{arp::{ArpFrame, ArpOperation}, ethernet_ii::EtherType}, mac_address::MacAddress};
+
 use super::ipv4::{Ipv4Address, Ipv4Frame};
 
 
@@ -43,7 +44,7 @@ impl Ipv4Interface {
         }
 
         // Send an ARP request to find the MAC address of the target IP address
-        self.ethernet.send_arp_request( self.ip_address, destination);
+        self.ethernet.arp_request( self.ip_address, destination);
 
         false
     }
@@ -56,8 +57,13 @@ impl Ipv4Interface {
 
         for frame in frames {
 
-            if frame.ether_type == EtherType::Ipv4 {
-                let ipv4_frame = match Ipv4Frame::from_bytes(frame.data()) {
+            let f = match frame {
+                EthernetFrame::Ethernet2(frame) => frame,
+                _ => continue  // Discard non-Ethernet2 frames
+            };
+
+            if f.ether_type == EtherType::Ipv4 {
+                let ipv4_frame = match Ipv4Frame::from_bytes(f.data()) {
                     Ok(ipv4_frame) => ipv4_frame,
                     Err(_) => continue  // Discard invalid Ipv4 frames
                 };
@@ -66,9 +72,9 @@ impl Ipv4Interface {
                 continue;
             }
 
-            if frame.ether_type == EtherType::Arp {
+            if f.ether_type == EtherType::Arp {
                 
-                let arp_frame = match ArpFrame::from_bytes(frame.data()) {
+                let arp_frame = match ArpFrame::from_bytes(f.data()) {
                     Ok(arp_frame) => arp_frame,
                     Err(_) => continue  // Discard invalid ARP frames
                 };
@@ -78,12 +84,12 @@ impl Ipv4Interface {
 
                 // Update the ARP table with the target's MAC address
                 if arp_frame.opcode == ArpOperation::Reply {
-                    self.arp_table.insert(arp_frame.target_ip, arp_frame.target_mac);
+                    self.arp_table.insert(arp_frame.sender_ip, arp_frame.sender_mac);
                 }
 
                 // Send an ARP reply if we are the target
                 else if arp_frame.target_ip == self.ip_address {
-                    self.ethernet.send_arp_reply(self.ip_address, arp_frame.sender_ip);
+                    self.ethernet.arp_reply(self.ip_address, arp_frame.sender_mac, arp_frame.sender_ip);
                 }
             }
         }
