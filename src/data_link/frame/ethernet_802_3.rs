@@ -8,8 +8,8 @@ use crate::data_link::mac_address::MacAddress;
 pub struct Ethernet802_3Frame {
     preamble: [u8; 7],
     start_frame_delimiter: u8,
-    destination_address: MacAddress,
-    source_address: MacAddress,
+    pub destination_address: MacAddress,
+    pub source_address: MacAddress,
     length: u16,
     dsap: u8,
     ssap: u8,

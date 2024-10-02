@@ -29,10 +29,13 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     switch.receive();
     sim.tick();
 
+    let i1_data = i1.receive();
     let i2_data = i2.receive();
-    let received_data3 = i3.receive();
+    let i3_data = i3.receive();
 
     // Assert
+    assert!(i1_data.is_empty());
+
     assert!(i2_data.len() == 1);
     assert_eq!(i2_data[0], eth2!(
         i2.mac_address,
@@ -41,8 +44,8 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
         EtherType::Debug
     ));
 
-    assert!(received_data3.len() == 1);
-    assert_eq!(received_data3[0], eth2!(
+    assert!(i3_data.len() == 1);
+    assert_eq!(i3_data[0], eth2!(
         i2.mac_address,
         i1.mac_address,
         eth2_data!(1),
@@ -76,8 +79,8 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     sim.tick();
     switch.receive();       // Switch learns MAC address of i1
     sim.tick();
-    i2.receive();   // dump incoming data
-    i3.receive();   // dump incoming data
+    i2.receive();           // dump incoming data
+    i3.receive();           // dump incoming data
 
     // Act
     i2.send(i1.mac_address, EtherType::Debug, eth2_data!(1));

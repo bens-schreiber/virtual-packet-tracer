@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{mac_addr, mac_broadcast_addr, network::ipv4::Ipv4Address, physical::ethernet_port::EthernetPort};
+use crate::{is_multicast_or_broadcast, mac_addr, mac_bpdu_addr, mac_broadcast_addr, network::ipv4::Ipv4Address, physical::ethernet_port::EthernetPort};
 
 use super::{frame::{arp::{ArpFrame, ArpOperation}, ethernet_802_3::Ethernet802_3Frame, ethernet_ii::{EtherType, Ethernet2Frame}}, mac_address::MacAddress};
 
@@ -32,6 +32,22 @@ impl EthernetFrame {
         };
 
         frame.map_err(|_| EthernetFrame::Invalid)
+    }
+
+    pub fn destination_address(&self) -> MacAddress {
+        match self {
+            EthernetFrame::Ethernet2(frame) => frame.destination_address,
+            EthernetFrame::Ethernet802_3(frame) => frame.destination_address,
+            _ => mac_addr!(0)
+        }
+    }
+
+    pub fn source_address(&self) -> MacAddress {
+        match self {
+            EthernetFrame::Ethernet2(frame) => frame.source_address,
+            EthernetFrame::Ethernet802_3(frame) => frame.source_address,
+            _ => mac_addr!(0)
+        }
     }
 }
 
@@ -107,16 +123,21 @@ impl EthernetInterface {
     }
 
     /// Returns a list of Ethernet frames that were received since the last call.
+    /// 
+    /// Frames are filtered to only include those with a destination MAC address that matches this interface's MAC address or are broadcast/multicast.
+    /// 
+    /// Frames with a source MAC address that is broadcast or multicast are also filtered out.
     pub fn receive(&mut self) -> Vec<EthernetFrame> {
         let bytes = self.port.borrow_mut().consume_incoming();
         if bytes.is_empty() {
             return vec![];
         }
-
+        
         let frames = bytes
             .into_iter()
             .map(|b| EthernetFrame::from_bytes(b))
-            .filter(|f| f.is_ok()).map(|f| f.unwrap())
+            .filter(|f| f.is_ok())
+            .map(|f| f.unwrap())
             .collect();
 
         frames

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{data_link::{ethernet_interface::{EthernetFrame, EthernetInterface}, mac_address::MacAddress}, mac_addr, mac_broadcast_addr, physical::ethernet_port::EthernetPort};
+use crate::{data_link::{ethernet_interface::{EthernetFrame, EthernetInterface}, mac_address::MacAddress}, is_multicast_or_broadcast, mac_addr, mac_broadcast_addr, physical::ethernet_port::EthernetPort};
 
 #[derive(Debug)]
 enum StpPortState {
@@ -47,8 +47,6 @@ impl Switch {
     /// All ports are in the forwarding state by default.
     pub fn from_seed(mac_seed: u8) -> Switch {
 
-        let root_mac = mac_addr!(mac_seed);
-
         let ports: [RefCell<SwitchPort>; 32] = (0..32)
             .map(|i| RefCell::new(SwitchPort {
                 interface: EthernetInterface::new(mac_addr!(mac_seed + i + 1)),
@@ -83,19 +81,18 @@ impl Switch {
                 continue;
             }
 
-
             for frame in frames {
+
+                // A source address cannot be a multicast or broadcast address
+                if is_multicast_or_broadcast!(frame.source_address()) {
+                    continue;
+                }
 
                 // TODO: Implement STP
                 let f = match frame {
                     EthernetFrame::Ethernet2(frame) => frame,
                     _ => continue  // Discard non-Ethernet2 frames
                 };
-
-                // A source address can never be the broadcast address.
-                if f.source_address == mac_broadcast_addr!() {
-                    continue; // Discard 
-                }
 
                 // If the sender MAC address is not in the table, add it.
                 if !self.table.contains_key(&f.source_address) {

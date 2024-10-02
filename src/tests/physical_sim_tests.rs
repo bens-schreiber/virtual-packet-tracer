@@ -18,8 +18,8 @@ fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
 
     EthernetInterface::connect(&mut i1, &mut i2);
 
-    i1.send(mac_addr!(0), EtherType::Debug, eth2_data!(1));
-    i2.send(mac_addr!(0), EtherType::Debug, eth2_data!(2));
+    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
+    i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2));
     uc_interface.send(mac_addr!(0), EtherType::Debug, eth2_data!(3));
 
     // Act
