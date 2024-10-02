@@ -1,11 +1,13 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_interface::EthernetInterface, frame::ethernet_ii::EtherType}, eth2_data, mac_addr, physical::physical_sim::PhysicalSimulator};
+use crate::device::cable::CableSimulator;
+use crate::ethernet::{interface::*, EtherType};
+use crate::{mac_addr, eth2_data};
 
 #[test]
 fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut uc_interface = EthernetInterface::new(mac_addr!(3));

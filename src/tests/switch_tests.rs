@@ -1,11 +1,14 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{device::switch::Switch, ethernet_interface::EthernetInterface, frame::ethernet_ii::{EtherType, Ethernet2Frame}}, eth2, eth2_data, mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
+use crate::device::cable::CableSimulator;
+use crate::device::switch::Switch;
+use crate::ethernet::{interface::*, EtherType};
+use crate::{mac_addr, mac_broadcast_addr, eth2_data, eth2};
 
 #[test]
 pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));
@@ -26,7 +29,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
     // Act
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     sim.tick();
-    switch.receive();
+    switch.forward();
     sim.tick();
 
     let i1_data = i1.receive();
@@ -57,7 +60,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
 #[test]
 pub fn Switch_ReceiveInTable_ForwardsFrame() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));
@@ -77,7 +80,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     sim.tick();
-    switch.receive();       // Switch learns MAC address of i1
+    switch.forward();       // Switch learns MAC address of i1
     sim.tick();
     i2.receive();           // dump incoming data
     i3.receive();           // dump incoming data
@@ -85,7 +88,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
     // Act
     i2.send(i1.mac_address, EtherType::Debug, eth2_data!(1));
     sim.tick();
-    switch.receive();
+    switch.forward();
     sim.tick();
 
     let i1_data = i1.receive();
@@ -107,7 +110,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 #[test]
 fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut i3 = EthernetInterface::new(mac_addr!(3));
@@ -128,7 +131,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     // Act
     i1.send(mac_broadcast_addr!(), EtherType::Debug, eth2_data!(1)); // Send broadcast
     sim.tick();
-    switch.receive();
+    switch.forward();
     sim.tick();
 
     let i2_data = i2.receive(); // Receive broadcast
@@ -136,7 +139,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
 
     i1.send(mac_broadcast_addr!(), EtherType::Debug, eth2_data!(2)); // Send broadcast
     sim.tick();
-    switch.receive();
+    switch.forward();
     sim.tick();
 
     let i2_data2 = i2.receive(); // Receive broadcast

@@ -1,55 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{is_multicast_or_broadcast, mac_addr, mac_bpdu_addr, mac_broadcast_addr, network::ipv4::Ipv4Address, physical::ethernet_port::EthernetPort};
+use crate::{device::cable::EthernetPort, ipv4::{ArpFrame, ArpOperation, Ipv4Address}, mac_addr, mac_broadcast_addr};
 
-use super::{frame::{arp::{ArpFrame, ArpOperation}, ethernet_802_3::Ethernet802_3Frame, ethernet_ii::{EtherType, Ethernet2Frame}}, mac_address::MacAddress};
+use super::*;
 
-
-#[macro_export]
-macro_rules! eth2 {
-    ($destination_address:expr, $source_address:expr, $data:expr, $ether_type:expr) => {
-        crate::data_link::ethernet_interface::EthernetFrame::Ethernet2(Ethernet2Frame::new($destination_address, $source_address, $data, $ether_type))
-    };
-}
-
-
-/// An Ethernet frame that can be either EthernetII or Ethernet802_3.
-#[derive(Debug, PartialEq)]
-pub enum EthernetFrame {
-    Ethernet2(Ethernet2Frame),
-    Ethernet802_3(Ethernet802_3Frame),
-    Invalid
-}
-
-impl EthernetFrame {
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, EthernetFrame> {
-        let ether_type_or_length = u16::from_be_bytes(bytes[20..22].try_into().unwrap());
-
-        let frame = if ether_type_or_length >= 0x0600 {
-            Ethernet2Frame::from_bytes(bytes).map(EthernetFrame::Ethernet2)
-        } else {
-            Ethernet802_3Frame::from_bytes(bytes).map(EthernetFrame::Ethernet802_3)
-        };
-
-        frame.map_err(|_| EthernetFrame::Invalid)
-    }
-
-    pub fn destination_address(&self) -> MacAddress {
-        match self {
-            EthernetFrame::Ethernet2(frame) => frame.destination_address,
-            EthernetFrame::Ethernet802_3(frame) => frame.destination_address,
-            _ => mac_addr!(0)
-        }
-    }
-
-    pub fn source_address(&self) -> MacAddress {
-        match self {
-            EthernetFrame::Ethernet2(frame) => frame.source_address,
-            EthernetFrame::Ethernet802_3(frame) => frame.source_address,
-            _ => mac_addr!(0)
-        }
-    }
-}
 
 /// A layer 2 interface for ethernet actions, sending and receiving Ethernet frames through a physical port stamped with a MAC address.
 #[derive(Debug, Clone)]

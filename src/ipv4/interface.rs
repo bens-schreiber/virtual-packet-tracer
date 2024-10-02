@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::data_link::{ethernet_interface::{EthernetFrame, EthernetInterface}, frame::{arp::{ArpFrame, ArpOperation}, ethernet_ii::EtherType}, mac_address::MacAddress};
-
-use super::ipv4::{Ipv4Address, Ipv4Frame};
+use crate::ethernet::interface::EthernetInterface;
+use crate::ethernet::*;
+use super::*;
 
 
 /// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
@@ -26,6 +26,7 @@ impl Ipv4Interface {
     pub fn ip_address(&self) -> Ipv4Address {
         self.ip_address
     }
+
 
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
     /// 

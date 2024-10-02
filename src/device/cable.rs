@@ -1,5 +1,55 @@
 use std::{cell::RefCell, rc::Rc};
 
+
+/// Simulates the movement of data.
+/// 
+/// Holds a collection of EthernetPorts and moves data between them in a synchronous manner.
+pub struct CableSimulator {
+    ports: Vec<Rc<RefCell<EthernetPort>>>,
+}
+
+impl CableSimulator {
+    pub fn new() -> CableSimulator {
+        CableSimulator {
+            ports: Vec::new(),
+        }
+    }
+
+    /// Adds a port to the simulator.
+    pub fn add(&mut self, port: Rc<RefCell<EthernetPort>>) {
+        self.ports.push(port);
+    }
+
+    /// Adds multiple ports to the simulator.
+    pub fn adds(&mut self, ports: Vec<Rc<RefCell<EthernetPort>>>) {
+        for port in ports {
+            self.add(port);
+        }
+    }
+
+    /// Simulates the movement of data over the physical connection.
+    /// 
+    /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
+    /// 
+    /// All data in this simulation is moved in a single tick, thus the simulator is synchronous.
+    pub fn tick(&mut self) {
+        for port in self.ports.iter() {
+            let mut port = port.borrow_mut();
+
+            // Connection, so move the outgoing buffer to the other port's incoming buffer
+            if let Some(connection) = port.connection.clone() {
+                port.consume_outgoing(&mut connection.borrow_mut());
+                continue;
+            }
+
+            // No connection, so clear the outgoing buffer
+            port.consume_outgoing(&mut EthernetPort::new());
+
+        }
+    }
+}
+
+
 /// A physical ethernet port capable of sending and receiving bytes via a physical (cable) connection.
 /// 
 /// This simulated port uses the idea of an Interpacket Gap (IPG) to prepare between frames for transmission
@@ -16,7 +66,7 @@ pub struct EthernetPort {
     outgoing_buffer: Vec<Vec<u8>>,
 
     /// None if a physical connection is not established
-    pub(super) connection: Option<Rc<RefCell<EthernetPort>>>,
+    connection: Option<Rc<RefCell<EthernetPort>>>,
 }
 
 impl EthernetPort {

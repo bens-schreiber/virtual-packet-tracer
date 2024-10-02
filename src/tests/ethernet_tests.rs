@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
-use crate::eth2_data;
-use crate::{mac_addr, mac_broadcast_addr, physical::physical_sim::PhysicalSimulator};
+use crate::ethernet::*;
+use crate::ethernet::interface::*;
+use crate::ethernet::ByteSerialize;
+use crate::{mac_addr, mac_broadcast_addr, eth2_data, eth2, eth802_3_data};
 
 mod EthernetFrameTests {
-    use crate::data_link::frame::ethernet_ii::{EtherType, Ethernet2Frame};
 
     use super::*;
 
@@ -119,7 +120,7 @@ mod EthernetFrameTests {
 }
 
 mod EthernetInterfaceTests {
-    use crate::{data_link::{ethernet_interface::{EthernetFrame, EthernetInterface}, frame::ethernet_ii::{EtherType, Ethernet2Frame}}, eth2, eth802_3_data};
+    use crate::device::cable::CableSimulator;
 
     use super::*;
 
@@ -138,7 +139,7 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendUni_ReceivesFrame() {
         // Arrange
-        let mut sim = PhysicalSimulator::new();
+        let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
@@ -171,7 +172,7 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendBi_ReceivesFrames() {
         // Arrange
-        let mut sim = PhysicalSimulator::new();
+        let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
@@ -213,7 +214,7 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendUniMult_ReceivesAllData() {
             // Arrange
-            let mut sim = PhysicalSimulator::new();
+            let mut sim = CableSimulator::new();
             let mut i1 = EthernetInterface::new(mac_addr!(1));
             let mut i2 = EthernetInterface::new(mac_addr!(2));
         
@@ -241,7 +242,7 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_SendBiMult_ReceivesAllData() {
         // Arrange
-        let mut sim = PhysicalSimulator::new();
+        let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
@@ -280,7 +281,7 @@ mod EthernetInterfaceTests {
     #[test]
     fn EthernetInterface_ReceiveEthernet2AndEthernet8023_ReturnsBothFrames() {
         // Arrange
-        let mut sim = PhysicalSimulator::new();
+        let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 

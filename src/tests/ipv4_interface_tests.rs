@@ -1,11 +1,16 @@
 #![allow(non_snake_case)]
 
-use crate::{data_link::{ethernet_interface::EthernetInterface, frame::{arp::{ArpFrame, ArpOperation}, ethernet_ii::{EtherType, Ethernet2Frame}}}, eth2, eth2_data, mac_addr, mac_broadcast_addr, network::{ipv4::Ipv4Frame, ipv4_interface::Ipv4Interface}, physical::physical_sim::PhysicalSimulator};
+use crate::ethernet::ByteSerialize;
+use crate::device::cable::CableSimulator;
+use crate::ipv4::*;
+use crate::ipv4::interface::*;
+use crate::ethernet::{interface::*, EtherType};
+use crate::{mac_addr, mac_broadcast_addr, eth2_data, eth2};
 
 #[test]
 fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpRequest() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
@@ -46,7 +51,7 @@ fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpRequest() {
 #[test]
 fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpReply() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
@@ -87,7 +92,7 @@ fn Ipv4Interface_SendToUnknownIpV4_ReceiveArpReply() {
 #[test]
 fn Ipv4Interface_SendArp_BothInterfacesFillArpTable() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
@@ -117,7 +122,7 @@ fn Ipv4Interface_SendArp_BothInterfacesFillArpTable() {
 #[test]
 fn Ipv4Interface_SendUni_ReceivesIpv4Frame() {
     // Arrange
-    let mut sim = PhysicalSimulator::new();
+    let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
 
