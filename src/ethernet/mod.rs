@@ -1,6 +1,5 @@
 pub mod interface;
 
-
 /// A data link physical address
 pub type MacAddress = [u8; 6];
 
@@ -28,7 +27,6 @@ macro_rules! mac_broadcast_addr {
     };
 }
 
-
 /// Returns true if the address is a multicast or broadcast address
 #[macro_export]
 macro_rules! is_mac_multicast_or_broadcast {
@@ -37,26 +35,25 @@ macro_rules! is_mac_multicast_or_broadcast {
     };
 }
 
-
 /// An Ethernet frame that can be EthernetII or Ethernet802_3.
 #[derive(Debug, PartialEq)]
 pub enum EthernetFrame {
     Ethernet2(Ethernet2Frame),
-    Ethernet802_3(Ethernet802_3Frame)
+    Ethernet802_3(Ethernet802_3Frame),
 }
 
 impl EthernetFrame {
     pub fn destination_address(&self) -> MacAddress {
         match self {
             EthernetFrame::Ethernet2(frame) => frame.destination_address,
-            EthernetFrame::Ethernet802_3(frame) => frame.destination_address
+            EthernetFrame::Ethernet802_3(frame) => frame.destination_address,
         }
     }
 
     pub fn source_address(&self) -> MacAddress {
         match self {
             EthernetFrame::Ethernet2(frame) => frame.source_address,
-            EthernetFrame::Ethernet802_3(frame) => frame.source_address
+            EthernetFrame::Ethernet802_3(frame) => frame.source_address,
         }
     }
 }
@@ -71,7 +68,9 @@ impl ByteSerialize for EthernetFrame {
             Ethernet802_3Frame::from_bytes(bytes).map(EthernetFrame::Ethernet802_3)
         };
 
-        frame.map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid Ethernet frame"))
+        frame.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid Ethernet frame")
+        })
     }
 }
 
@@ -79,7 +78,12 @@ impl ByteSerialize for EthernetFrame {
 #[macro_export]
 macro_rules! eth2 {
     ($destination_address:expr, $source_address:expr, $data:expr, $ether_type:expr) => {
-        crate::ethernet::EthernetFrame::Ethernet2(crate::ethernet::Ethernet2Frame::new($destination_address, $source_address, $data, $ether_type))
+        crate::ethernet::EthernetFrame::Ethernet2(crate::ethernet::Ethernet2Frame::new(
+            $destination_address,
+            $source_address,
+            $data,
+            $ether_type,
+        ))
     };
 }
 
@@ -101,7 +105,6 @@ macro_rules! eth802_3_data {
     }};
 }
 
-
 /// Ethernet II EtherType field
 #[repr(u16)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -121,11 +124,10 @@ impl From<u16> for EtherType {
     }
 }
 
-
 /// Ethernet II frame format
-/// 
+///
 /// Used for all Ethernet frames except LLC frames
-/// 
+///
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet2Frame {
     preamble: [u8; 7],
@@ -138,7 +140,12 @@ pub struct Ethernet2Frame {
 }
 
 impl Ethernet2Frame {
-    pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>, ether_type: EtherType) -> Ethernet2Frame {
+    pub fn new(
+        destination_address: MacAddress,
+        source_address: MacAddress,
+        data: Vec<u8>,
+        ether_type: EtherType,
+    ) -> Ethernet2Frame {
         Ethernet2Frame {
             preamble: [0x55; 7],
             start_frame_delimiter: 0xD5,
@@ -146,34 +153,49 @@ impl Ethernet2Frame {
             source_address,
             ether_type,
             data,
-            frame_check_sequence: 0,        // TODO: Calculate FCS
+            frame_check_sequence: 0, // TODO: Calculate FCS
         }
     }
 }
 
 impl ByteSerialize for Ethernet2Frame {
     /// Creates an EthernetFrame from a byte array
-    fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet2Frame, std::io::Error>  {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet2Frame, std::io::Error> {
         if bytes.len() < 46 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Insufficient bytes for Ethernet frame; Runt frame.",
+            ));
         }
 
         if bytes.len() > 1500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Oversized Ethernet frame; Giant frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Oversized Ethernet frame; Giant frame.",
+            ));
         }
 
         // Ignore the preamble and start frame delimiter. Unnecessary for virtual simulation.
         let preamble = [0x55; 7];
         let start_frame_delimiter = 0xD5;
 
-        let destination_address = [bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13]];
-        let source_address = [bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19]];
+        let destination_address = [
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+        ];
+        let source_address = [
+            bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19],
+        ];
 
         let ether_type: EtherType = u16::from_be_bytes([bytes[20], bytes[21]]).into();
 
-        let data = bytes[22..bytes.len()-4].to_vec();
+        let data = bytes[22..bytes.len() - 4].to_vec();
 
-        let frame_check_sequence = u32::from_be_bytes([bytes[bytes.len()-4], bytes[bytes.len()-3], bytes[bytes.len()-2], bytes[bytes.len()-1]]);
+        let frame_check_sequence = u32::from_be_bytes([
+            bytes[bytes.len() - 4],
+            bytes[bytes.len() - 3],
+            bytes[bytes.len() - 2],
+            bytes[bytes.len() - 1],
+        ]);
 
         Ok(Ethernet2Frame {
             preamble,
@@ -203,11 +225,10 @@ impl ByteSerialize for Ethernet2Frame {
     }
 }
 
-
 /// IEEE 802.3 Ethernet Frame
-/// 
+///
 /// Used only for LLC frames
-/// 
+///
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet802_3Frame {
     preamble: [u8; 7],
@@ -223,39 +244,53 @@ pub struct Ethernet802_3Frame {
 }
 
 impl Ethernet802_3Frame {
-    pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>) -> Ethernet802_3Frame {
+    pub fn new(
+        destination_address: MacAddress,
+        source_address: MacAddress,
+        data: Vec<u8>,
+    ) -> Ethernet802_3Frame {
         Ethernet802_3Frame {
             preamble: [0x55; 7],
             start_frame_delimiter: 0xD5,
             destination_address,
             source_address,
             length: data.len() as u16,
-            dsap: 0x42,                     // Spanning Tree Protocol
-            ssap: 0x42,                     // Spanning Tree Protocol
+            dsap: 0x42, // Spanning Tree Protocol
+            ssap: 0x42, // Spanning Tree Protocol
             control: 0x03,
             data,
-            frame_check_sequence: 0,        // TODO: Calculate FCS
+            frame_check_sequence: 0, // TODO: Calculate FCS
         }
     }
 }
 
 impl ByteSerialize for Ethernet802_3Frame {
     /// Creates an EthernetFrame from a byte array
-    fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error>  {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error> {
         if bytes.len() < 64 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ethernet frame; Runt frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Insufficient bytes for Ethernet frame; Runt frame.",
+            ));
         }
 
         if bytes.len() > 1518 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Oversized Ethernet frame; Giant frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Oversized Ethernet frame; Giant frame.",
+            ));
         }
 
         // Ignore the preamble and start frame delimiter. Unnecessary for virtual simulation.
         let preamble = [0x55; 7];
         let start_frame_delimiter = 0xD5;
 
-        let destination_address = [bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13]];
-        let source_address = [bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19]];
+        let destination_address = [
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+        ];
+        let source_address = [
+            bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19],
+        ];
 
         let length = u16::from_be_bytes([bytes[20], bytes[21]]);
 
@@ -263,9 +298,14 @@ impl ByteSerialize for Ethernet802_3Frame {
         let ssap = bytes[23];
         let control = bytes[24];
 
-        let data = bytes[25..bytes.len()-4].to_vec();
+        let data = bytes[25..bytes.len() - 4].to_vec();
 
-        let frame_check_sequence = u32::from_be_bytes([bytes[bytes.len()-4], bytes[bytes.len()-3], bytes[bytes.len()-2], bytes[bytes.len()-1]]);
+        let frame_check_sequence = u32::from_be_bytes([
+            bytes[bytes.len() - 4],
+            bytes[bytes.len() - 3],
+            bytes[bytes.len() - 2],
+            bytes[bytes.len() - 1],
+        ]);
 
         Ok(Ethernet802_3Frame {
             preamble,
@@ -297,13 +337,13 @@ impl ByteSerialize for Ethernet802_3Frame {
     }
 }
 
-
-
 /// Can be converted to and from a byte array
 pub trait ByteSerialize {
     fn to_bytes(&self) -> Vec<u8> {
         Vec::new()
     }
-    
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> where Self: Sized;
+
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error>
+    where
+        Self: Sized;
 }

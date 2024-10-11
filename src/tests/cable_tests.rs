@@ -2,7 +2,7 @@
 
 use crate::device::cable::CableSimulator;
 use crate::ethernet::{interface::*, EtherType};
-use crate::{mac_addr, eth2_data};
+use crate::{eth2_data, mac_addr};
 
 #[test]
 fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
@@ -12,11 +12,7 @@ fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut uc_interface = EthernetInterface::new(mac_addr!(3));
 
-    sim.adds(vec![
-        i1.port(),
-        i2.port(),
-        uc_interface.port(),
-    ]);
+    sim.adds(vec![i1.port(), i2.port(), uc_interface.port()]);
 
     EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -31,5 +27,4 @@ fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
     assert!(!i1.port().borrow().has_outgoing());
     assert!(!i2.port().borrow().has_outgoing());
     assert!(!uc_interface.port().borrow().has_outgoing());
-
 }

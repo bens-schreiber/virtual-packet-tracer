@@ -8,12 +8,11 @@ mod device {
     pub mod switch;
 }
 
-
 #[cfg(test)]
 mod tests {
+    pub mod cable_tests;
     pub mod ethernet_tests;
     pub mod ipv4_interface_tests;
-    pub mod cable_tests;
     pub mod switch_tests;
 }
 

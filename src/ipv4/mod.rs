@@ -1,27 +1,25 @@
-use crate::{ethernet::MacAddress, ethernet::ByteSerialize};
+use crate::{ethernet::ByteSerialize, ethernet::MacAddress};
 
 pub mod interface;
-
 
 /// Internet Protocol version 4 (IPv4) address
 pub type Ipv4Address = [u8; 4];
 
-
 /// A network layer frame for IPv4 communication
 #[derive(Debug, PartialEq)]
 pub struct Ipv4Frame {
-    version_hlen : u8,              // 4 bits version, 4 bits header length
-    tos : u8,                       // Type of service
-    total_length : u16,             // Total length of the frame
-    id : u16,
-    flags_fragment_offset : u16,    // 3 bits flags, 13 bits fragment offset
-    ttl : u8,                       // Time to live
-    protocol : u8,
-    checksum : u16,
-    source : Ipv4Address,
-    destination : Ipv4Address,
+    version_hlen: u8,  // 4 bits version, 4 bits header length
+    tos: u8,           // Type of service
+    total_length: u16, // Total length of the frame
+    id: u16,
+    flags_fragment_offset: u16, // 3 bits flags, 13 bits fragment offset
+    ttl: u8,                    // Time to live
+    protocol: u8,
+    checksum: u16,
+    source: Ipv4Address,
+    destination: Ipv4Address,
     option: Vec<u8>,
-    data : Vec<u8>
+    data: Vec<u8>,
 }
 
 impl Ipv4Frame {
@@ -32,13 +30,13 @@ impl Ipv4Frame {
             total_length: 20 + data.len() as u16,
             id: 0,
             flags_fragment_offset: 0,
-            ttl: 64,            // Default TTL
+            ttl: 64, // Default TTL
             protocol: 0,
-            checksum: 0,        // TODO: Calculate checksum
+            checksum: 0, // TODO: Calculate checksum
             source,
             destination,
             option: Vec::new(),
-            data
+            data,
         }
     }
 }
@@ -63,11 +61,17 @@ impl ByteSerialize for Ipv4Frame {
 
     fn from_bytes(bytes: Vec<u8>) -> Result<Ipv4Frame, std::io::Error> {
         if bytes.len() < 20 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Insufficient bytes for Ipv4 frame; Runt frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Insufficient bytes for Ipv4 frame; Runt frame.",
+            ));
         }
 
         if bytes.len() > 65535 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Oversized Ipv4 frame; Giant frame."));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Oversized Ipv4 frame; Giant frame.",
+            ));
         }
 
         let version_hlen = bytes[0];
@@ -82,7 +86,7 @@ impl ByteSerialize for Ipv4Frame {
         let destination = [bytes[16], bytes[17], bytes[18], bytes[19]];
         let option = bytes[20..(version_hlen & 0x0F) as usize * 4].to_vec();
         let data = bytes[(version_hlen & 0x0F) as usize * 4..].to_vec();
-        
+
         Ok(Ipv4Frame {
             version_hlen,
             tos,
@@ -99,7 +103,6 @@ impl ByteSerialize for Ipv4Frame {
         })
     }
 }
-
 
 /// Address Resolution Protocol (ARP) operation code
 #[repr(u16)]
@@ -118,7 +121,6 @@ impl From<u16> for ArpOperation {
         }
     }
 }
-
 
 /// Address Resolution Protocol (ARP)
 pub struct ArpFrame {
@@ -142,8 +144,8 @@ impl ArpFrame {
         target_ip: Ipv4Address,
     ) -> ArpFrame {
         ArpFrame {
-            hardware_type: 1,       // Ethernet
-            protocol_type: 0x0800,  // Ipv4
+            hardware_type: 1,      // Ethernet
+            protocol_type: 0x0800, // Ipv4
             hardware_size: 6,
             protocol_size: 4,
             opcode,
@@ -172,7 +174,10 @@ impl ByteSerialize for ArpFrame {
 
     fn from_bytes(bytes: Vec<u8>) -> Result<ArpFrame, std::io::Error> {
         if bytes.len() != 28 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid ARP frame"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid ARP frame",
+            ));
         }
 
         let hardware_type = u16::from_be_bytes([bytes[0], bytes[1]]);

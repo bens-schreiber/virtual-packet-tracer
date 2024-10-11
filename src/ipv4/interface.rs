@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
+use super::*;
 use crate::ethernet::interface::EthernetInterface;
 use crate::ethernet::*;
-use super::*;
-
 
 /// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
-/// 
+///
 /// Contains an ARP table to map IP addresses to MAC addresses.
 pub struct Ipv4Interface {
-    pub(crate) ethernet: EthernetInterface,
+    pub ethernet: EthernetInterface,
     ip_address: Ipv4Address,
     arp_table: HashMap<Ipv4Address, MacAddress>,
 }
@@ -19,7 +18,7 @@ impl Ipv4Interface {
         Ipv4Interface {
             ethernet: EthernetInterface::new(mac_address),
             ip_address,
-            arp_table: HashMap::new()
+            arp_table: HashMap::new(),
         }
     }
 
@@ -27,25 +26,23 @@ impl Ipv4Interface {
         self.ip_address
     }
 
-
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
-    /// 
+    ///
     /// If the MAC address of the destination IP address is not in the ARP table, an ARP request is sent.
-    /// 
+    ///
     /// Returns true if the data was sent successfully.
-    /// 
+    ///
     /// Returns false if the MAC address of the destination IP address is not in the ARP table.
     pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
         if let Some(mac_address) = self.arp_table.get(&destination) {
-
             let bytes = Ipv4Frame::new(self.ip_address, destination, data).to_bytes();
-            
+
             self.ethernet.send(*mac_address, EtherType::Ipv4, bytes);
             return true;
         }
 
         // Send an ARP request to find the MAC address of the target IP address
-        self.ethernet.arp_request( self.ip_address, destination);
+        self.ethernet.arp_request(self.ip_address, destination);
 
         false
     }
@@ -57,16 +54,15 @@ impl Ipv4Interface {
         let frames = self.ethernet.receive();
 
         for frame in frames {
-
             let f = match frame {
                 EthernetFrame::Ethernet2(frame) => frame,
-                _ => continue  // Discard non-Ethernet2 frames
+                _ => continue, // Discard non-Ethernet2 frames
             };
 
             if f.ether_type == EtherType::Ipv4 {
                 let ipv4_frame = match Ipv4Frame::from_bytes(f.data) {
                     Ok(ipv4_frame) => ipv4_frame,
-                    Err(_) => continue  // Discard invalid Ipv4 frames
+                    Err(_) => continue, // Discard invalid Ipv4 frames
                 };
 
                 ipv4_frames.push(ipv4_frame);
@@ -74,23 +70,27 @@ impl Ipv4Interface {
             }
 
             if f.ether_type == EtherType::Arp {
-                
                 let arp_frame = match ArpFrame::from_bytes(f.data) {
                     Ok(arp_frame) => arp_frame,
-                    Err(_) => continue  // Discard invalid ARP frames
+                    Err(_) => continue, // Discard invalid ARP frames
                 };
 
                 // Update the ARP table with the sender's MAC address
-                self.arp_table.insert(arp_frame.sender_ip, arp_frame.sender_mac);
+                self.arp_table
+                    .insert(arp_frame.sender_ip, arp_frame.sender_mac);
 
                 // Update the ARP table with the target's MAC address
                 if arp_frame.opcode == ArpOperation::Reply {
-                    self.arp_table.insert(arp_frame.sender_ip, arp_frame.sender_mac);
+                    self.arp_table
+                        .insert(arp_frame.sender_ip, arp_frame.sender_mac);
                 }
-
                 // Send an ARP reply if we are the target
                 else if arp_frame.target_ip == self.ip_address {
-                    self.ethernet.arp_reply(self.ip_address, arp_frame.sender_mac, arp_frame.sender_ip);
+                    self.ethernet.arp_reply(
+                        self.ip_address,
+                        arp_frame.sender_mac,
+                        arp_frame.sender_ip,
+                    );
                 }
             }
         }

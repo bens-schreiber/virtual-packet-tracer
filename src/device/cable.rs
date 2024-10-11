@@ -1,8 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-
 /// Simulates the movement of data.
-/// 
+///
 /// Holds a collection of EthernetPorts and moves data between them in a synchronous manner.
 pub struct CableSimulator {
     ports: Vec<Rc<RefCell<EthernetPort>>>,
@@ -10,9 +9,7 @@ pub struct CableSimulator {
 
 impl CableSimulator {
     pub fn new() -> CableSimulator {
-        CableSimulator {
-            ports: Vec::new(),
-        }
+        CableSimulator { ports: Vec::new() }
     }
 
     /// Adds a port to the simulator.
@@ -27,10 +24,17 @@ impl CableSimulator {
         }
     }
 
+    #[cfg(test)]
+    pub fn ticks(&mut self, ticks: usize) {
+        for _ in 0..ticks {
+            self.tick();
+        }
+    }
+
     /// Simulates the movement of data over the physical connection.
-    /// 
+    ///
     /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
-    /// 
+    ///
     /// All data in this simulation is moved in a single tick, thus the simulator is synchronous.
     pub fn tick(&mut self) {
         for port in self.ports.iter() {
@@ -44,19 +48,16 @@ impl CableSimulator {
 
             // No connection, so clear the outgoing buffer
             port.consume_outgoing(&mut EthernetPort::new());
-
         }
     }
 }
 
-
 /// A physical ethernet port capable of sending and receiving bytes via a physical (cable) connection.
-/// 
+///
 /// This simulated port uses the idea of an Interpacket Gap (IPG) to prepare between frames for transmission
 /// (represented by the Vec<Vec<u8>>, each Vec<u8> is a frame, able to be individually received because of the IPG).
 #[derive(Debug, Clone)]
 pub struct EthernetPort {
-
     /// Incoming bytes from the physical connection
     incoming_buffer: Vec<Vec<u8>>,
 
@@ -107,5 +108,4 @@ impl EthernetPort {
     pub fn has_outgoing(&self) -> bool {
         !self.outgoing_buffer.is_empty()
     }
-    
 }

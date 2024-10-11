@@ -1,26 +1,23 @@
 #![allow(non_snake_case)]
 
-use crate::ethernet::*;
 use crate::ethernet::interface::*;
 use crate::ethernet::ByteSerialize;
-use crate::{mac_addr, mac_broadcast_addr, eth2_data, eth2, eth802_3_data};
+use crate::ethernet::*;
+use crate::{eth2, eth2_data, eth802_3_data, mac_addr, mac_broadcast_addr};
 
 mod EthernetFrameTests {
 
     use super::*;
 
-    
     #[test]
     fn Ethernet2Frame_ToBytes_ReturnsValidByteArray() {
-
         // Arrange
         let ethernet_frame = Ethernet2Frame::new(
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
             eth2_data!(1),
-            EtherType::Debug
+            EtherType::Debug,
         );
-
 
         // Act
         let bytes = ethernet_frame.to_bytes();
@@ -52,7 +49,7 @@ mod EthernetFrameTests {
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
             eth2_data!(1),
-            EtherType::Debug
+            EtherType::Debug,
         );
 
         let bytes = ethernet_frame.to_bytes();
@@ -72,7 +69,7 @@ mod EthernetFrameTests {
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
             eth2_data!(1),
-            EtherType::Debug
+            EtherType::Debug,
         );
 
         // Act
@@ -105,7 +102,7 @@ mod EthernetFrameTests {
             mac_broadcast_addr!(),
             [0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
             eth2_data!(1),
-            EtherType::Debug
+            EtherType::Debug,
         );
 
         let bytes = ethernet_frame.to_bytes();
@@ -128,10 +125,10 @@ mod EthernetInterfaceTests {
     fn EthernetInterface_Receive_ReturnsEmptyVecWhenNoData() {
         // Arrange
         let mut i1 = EthernetInterface::new(mac_addr!(1));
-    
+
         // Act
         let i1_data = i1.receive();
-    
+
         // Assert
         assert!(i1_data.is_empty());
     }
@@ -143,10 +140,7 @@ mod EthernetInterfaceTests {
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.adds(vec![
-            i1.port(),
-            i2.port(),
-        ]);
+        sim.adds(vec![i1.port(), i2.port()]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -161,12 +155,15 @@ mod EthernetInterfaceTests {
         assert!(i1_data.is_empty());
         assert!(i2_data.len() == 1);
 
-        assert_eq!(i2_data[0], eth2!(
-            i2.mac_address,
-            i1.mac_address,
-            eth2_data!(1),
-            EtherType::Debug
-        ));
+        assert_eq!(
+            i2_data[0],
+            eth2!(
+                i2.mac_address,
+                i1.mac_address,
+                eth2_data!(1),
+                EtherType::Debug
+            )
+        );
     }
 
     #[test]
@@ -176,10 +173,7 @@ mod EthernetInterfaceTests {
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.adds(vec![
-            i1.port(),
-            i2.port(),
-        ]);
+        sim.adds(vec![i1.port(), i2.port()]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -195,48 +189,50 @@ mod EthernetInterfaceTests {
         assert!(i1_data.len() == 1);
         assert!(i2_data.len() == 1);
 
-        assert_eq!(i1_data[0], eth2!(
-            i1.mac_address,
-            i2.mac_address,
-            eth2_data!(2),
-            EtherType::Debug
-        ));
+        assert_eq!(
+            i1_data[0],
+            eth2!(
+                i1.mac_address,
+                i2.mac_address,
+                eth2_data!(2),
+                EtherType::Debug
+            )
+        );
 
-        assert_eq!(i2_data[0], eth2!(
-            i2.mac_address,
-            i1.mac_address,
-            eth2_data!(1),
-            EtherType::Debug
-        ));
-
+        assert_eq!(
+            i2_data[0],
+            eth2!(
+                i2.mac_address,
+                i1.mac_address,
+                eth2_data!(1),
+                EtherType::Debug
+            )
+        );
     }
 
     #[test]
     fn EthernetInterface_SendUniMult_ReceivesAllData() {
-            // Arrange
-            let mut sim = CableSimulator::new();
-            let mut i1 = EthernetInterface::new(mac_addr!(1));
-            let mut i2 = EthernetInterface::new(mac_addr!(2));
-        
-            sim.adds(vec![
-                i1.port(),
-                i2.port(),
-            ]);
-        
-            EthernetInterface::connect(&mut i1, &mut i2);
+        // Arrange
+        let mut sim = CableSimulator::new();
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+        let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-            // Act
-            i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-            i1.send(i2.mac_address, EtherType::Debug, eth2_data!(2));
-            i1.send(i2.mac_address, EtherType::Debug, eth2_data!(3));
-            sim.tick();
-            let received_data = i2.receive_eth2();
+        sim.adds(vec![i1.port(), i2.port()]);
 
-            // Assert
-            assert!(received_data.len() == 3);
-            assert_eq!(*received_data[0].data, eth2_data!(1));
-            assert_eq!(*received_data[1].data, eth2_data!(2));
-            assert_eq!(*received_data[2].data, eth2_data!(3));
+        EthernetInterface::connect(&mut i1, &mut i2);
+
+        // Act
+        i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
+        i1.send(i2.mac_address, EtherType::Debug, eth2_data!(2));
+        i1.send(i2.mac_address, EtherType::Debug, eth2_data!(3));
+        sim.tick();
+        let received_data = i2.receive_eth2();
+
+        // Assert
+        assert!(received_data.len() == 3);
+        assert_eq!(*received_data[0].data, eth2_data!(1));
+        assert_eq!(*received_data[1].data, eth2_data!(2));
+        assert_eq!(*received_data[2].data, eth2_data!(3));
     }
 
     #[test]
@@ -246,10 +242,7 @@ mod EthernetInterfaceTests {
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.adds(vec![
-            i1.port(),
-            i2.port(),
-        ]);
+        sim.adds(vec![i1.port(), i2.port()]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
@@ -257,7 +250,7 @@ mod EthernetInterfaceTests {
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(2));
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(3));
-        
+
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(4));
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(5));
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(6));
@@ -285,10 +278,7 @@ mod EthernetInterfaceTests {
         let mut i1 = EthernetInterface::new(mac_addr!(1));
         let mut i2 = EthernetInterface::new(mac_addr!(2));
 
-        sim.adds(vec![
-            i1.port(),
-            i2.port(),
-        ]);
+        sim.adds(vec![i1.port(), i2.port()]);
 
         EthernetInterface::connect(&mut i1, &mut i2);
 
