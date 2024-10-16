@@ -13,7 +13,7 @@ enum StpPortRole {
     Designated,
     Alternate,
     Backup,
-    Disabled,
+    Disabled, // Nothing in, nothing out
 }
 
 #[derive(Debug, PartialEq)]
@@ -88,10 +88,13 @@ impl Switch {
     }
 
     /// Connects two ports together via EthernetPorts (bi-directional).
-    /// * `port` - The port on this switch to connect.
-    /// * `other_port` - The port on the other interface to connect to.
-    pub fn connect(&mut self, port: usize, other_port: &mut EthernetInterface) {
-        self.ports[port].borrow_mut().interface.connect(other_port);
+    /// * `switch_port_id` - The port on this switch to connect.
+    /// * `interface` - An EthernetInterface to connect to the switch.
+    pub fn connect(&mut self, switch_port_id: usize, interface: &mut EthernetInterface) {
+        self.ports[switch_port_id]
+            .borrow_mut()
+            .interface
+            .connect(interface);
     }
 
     /// Connects two switches ports together via EthernetPorts (bi-directional).

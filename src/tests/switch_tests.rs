@@ -367,3 +367,87 @@ fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts()
     assert!(!s3.designated_ports().contains(&s3_s2_port));
     assert!(s3.disabled_ports().contains(&s3_s2_port));
 }
+
+// ****************************************************************************************************
+// Full integration test for the spanning tree protocol: Can we avoid broadcast storms?
+// ****************************************************************************************************
+#[test]
+fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBlockedPort() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(33, 2);
+    let mut s3 = Switch::from_seed(65, 3);
+
+    let mut i1 = EthernetInterface::new(mac_addr!(100));
+    let mut i2 = EthernetInterface::new(mac_addr!(200));
+
+    s1.connect_switch(0, &mut s2, 0);
+    s1.connect_switch(1, &mut s3, 0);
+    s2.connect_switch(1, &mut s3, 1);
+
+    s3.connect(3, &mut i1);
+    s2.connect(2, &mut i2);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+    sim.adds(s3.ports());
+    sim.adds(vec![i1.port(), i2.port()]);
+
+    s1.init_stp();
+    s2.init_stp();
+    s3.init_stp();
+
+    for _ in 0..10 {
+        // unscientifically determined number of iterations to converge
+        sim.tick();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+    }
+    s1.finish_init_stp();
+    s2.finish_init_stp();
+    s3.finish_init_stp();
+    i1.receive(); // dump incoming data, just bpdu frames we don't care about
+    i2.receive(); // dump incoming data, just bpdu frames we don't care about
+
+    // Act
+    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1)); // Should have to traverse i1 -> s3 -> s1 -> s2 -> i2
+    i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2)); // Should have to traverse i2 -> s2 -> s1 -> s3 -> i1
+    sim.tick();
+
+    for _ in 0..3 {
+        // unscientifically determined number of iterations to converge
+        s1.forward();
+        s2.forward();
+        s3.forward();
+        sim.tick();
+    }
+
+    let i1_data = i1.receive();
+    let i2_data = i2.receive();
+
+    // Assert
+    assert!(i1_data.len() == 1);
+    assert_eq!(
+        i1_data[0],
+        eth2!(
+            i1.mac_address,
+            i2.mac_address,
+            eth2_data!(2),
+            EtherType::Debug
+        )
+    );
+
+    assert!(i2_data.len() == 1);
+    assert_eq!(
+        i2_data[0],
+        eth2!(
+            i2.mac_address,
+            i1.mac_address,
+            eth2_data!(1),
+            EtherType::Debug
+        )
+    );
+}
