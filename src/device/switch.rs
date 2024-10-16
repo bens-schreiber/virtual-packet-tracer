@@ -35,10 +35,9 @@ struct StpPort {
 /// A layer two switch; forwards Ethernet frames to the correct interface.
 ///
 /// Implements IEEE 802.1W Rapid Spanning Tree Protocol (RSTP) to prevent loops.
-///
-/// All ports are enabled by default in the forwarding state.
 pub struct Switch {
     ports: [RefCell<StpPort>; 32],     // 32 physical ports
+    responds_to_bpdu: u32,             // A bitmap that indicates which ports respond to BPDUs
     table: HashMap<MacAddress, usize>, // maps an address to the interface it's connected to.
 
     pub mac_address: MacAddress,
@@ -47,14 +46,11 @@ pub struct Switch {
     pub root_bid: u64,  // Root Bridge ID = Root MAC Address + Root Priority
     pub root_cost: u32, // The cost of the path to the root bridge ; 0 for the root bridge
     pub root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
-
-    pub responds_to_bpdu: u32, // A bitmap that indicates which ports respond to BPDUs
 }
 
 impl Switch {
     /// Creates a new switch with 32 interfaces, each with a unique MAC address based on the given seed. All ports assume they
     /// are designated ports. The switch is assumed to be the root bridge.
-    ///
     /// * `mac_seed` - The seed for the MAC addresses of the interfaces. Will take the range [mac_seed, mac_seed + 32].
     /// * `bridge_priority` - The priority of the switch in the spanning tree protocol.
     pub fn from_seed(mac_seed: u8, bridge_priority: u16) -> Switch {
@@ -83,29 +79,35 @@ impl Switch {
         }
     }
 
+    /// Returns the Bridge ID of the switch. (Bridge MAC Address + Bridge Priority)
     pub fn bid(&self) -> u64 {
         crate::bridge_id!(self.mac_address, self.bridge_priority)
     }
 
     /// Connects two ports together via EthernetPorts (bi-directional).
-    /// * `switch_port_id` - The port on this switch to connect.
+    /// * `port_id` - The id of the port on this switch to connect.
     /// * `interface` - An EthernetInterface to connect to the switch.
-    pub fn connect(&mut self, switch_port_id: usize, interface: &mut EthernetInterface) {
-        self.ports[switch_port_id]
+    pub fn connect(&mut self, port_id: usize, interface: &mut EthernetInterface) {
+        self.ports[port_id]
             .borrow_mut()
             .interface
             .connect(interface);
     }
 
     /// Connects two switches ports together via EthernetPorts (bi-directional).
-    /// * `port` - The port on this switch to connect.
+    /// * `port_id` - The port on this switch to connect.
     /// * `other_switch` - The other switch to connect to.
-    /// * `other_port` - The port on the other switch to connect to.
-    pub fn connect_switch(&mut self, port: usize, other_switch: &mut Switch, other_port: usize) {
-        self.ports[port]
+    /// * `other_port_id` - The port on the other switch to connect to.
+    pub fn connect_switch(
+        &mut self,
+        port_id: usize,
+        other_switch: &mut Switch,
+        other_port_id: usize,
+    ) {
+        self.ports[port_id]
             .borrow_mut()
             .interface
-            .connect(&other_switch.ports[other_port].borrow_mut().interface);
+            .connect(&other_switch.ports[other_port_id].borrow_mut().interface);
     }
 
     /// Initializes RSTP (Rapid Spanning Tree Protocol) on the switch by setting all ports to the Discarding state,
@@ -128,11 +130,15 @@ impl Switch {
             bpdu.port = port.borrow().id;
             port.borrow_mut()
                 .interface
-                .send802_3(crate::mac_bpdu_addr!(), bpdu.to_bytes());
+                .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
         }
     }
 
     /// Finishes the initialization stage of the switch by allowing traffic from end devices.
+    ///
+    /// Any port in the Learning state is moved to the Forwarding state.
+    ///
+    /// Any port that does not respond to BPDUs is moved to the Forwarding state.
     pub fn finish_init_stp(&mut self) {
         for (i, port) in self.ports.iter_mut().enumerate() {
             let is_end_device = self.responds_to_bpdu & (1 << i) == 0;
@@ -145,6 +151,8 @@ impl Switch {
 
     /// Forwards incoming frames to the correct interface based on the destination MAC address.
     /// If the destination MAC address is not in the table, the frame is flooded to all interfaces.
+    ///
+    /// If the switch receives a BPDU frame, it will update its state based on the BPDU.
     pub fn forward(&mut self) {
         for (port, interface) in self.ports.iter().enumerate() {
             let frames = interface.borrow_mut().interface.receive();
@@ -177,7 +185,7 @@ impl Switch {
                             return;
                         }
 
-                        // Destination isn't in table, flood to all interfaces (except the one it came from)
+                        // Destination isn't in table, flood to all interfaces (except the one it came from, and disabled ports)
                         for (i, other_interface) in self.ports.iter().enumerate() {
                             if i == port
                                 || other_interface.borrow().stp_role == StpPortRole::Disabled
@@ -232,18 +240,19 @@ impl Switch {
                                 continue;
                             }
 
-                            let port_id = other_interface.borrow().id;
-                            other_interface.borrow_mut().interface.send802_3(
-                                crate::mac_bpdu_addr!(),
-                                BpduFrame::hello(
-                                    self.mac_address,
-                                    self.root_bid,
-                                    self.root_cost,
-                                    crate::bridge_id!(self.mac_address, self.bridge_priority),
-                                    port_id,
-                                )
-                                .to_bytes(),
+                            let bpdu = BpduFrame::hello(
+                                self.mac_address,
+                                self.root_bid,
+                                self.root_cost,
+                                crate::bridge_id!(self.mac_address, self.bridge_priority),
+                                other_interface.borrow().id,
                             );
+
+                            // Send the BPDU to the other interface over Ethernet802_3
+                            other_interface
+                                .borrow_mut()
+                                .interface
+                                .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
                         }
                     }
                 };

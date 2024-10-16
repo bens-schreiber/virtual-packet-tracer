@@ -13,21 +13,16 @@ impl CableSimulator {
     }
 
     /// Adds a port to the simulator.
-    pub fn add(&mut self, port: Rc<RefCell<EthernetPort>>) {
-        self.ports.push(port);
+    /// * `ethernet_port` - The port to add to the simulator.
+    pub fn add(&mut self, ethernet_port: Rc<RefCell<EthernetPort>>) {
+        self.ports.push(ethernet_port);
     }
 
     /// Adds multiple ports to the simulator.
-    pub fn adds(&mut self, ports: Vec<Rc<RefCell<EthernetPort>>>) {
-        for port in ports {
-            self.add(port);
-        }
-    }
-
-    #[cfg(test)]
-    pub fn ticks(&mut self, ticks: usize) {
-        for _ in 0..ticks {
-            self.tick();
+    /// * `ethernet_ports` - The ports to add to the simulator.
+    pub fn adds(&mut self, ethernet_ports: Vec<Rc<RefCell<EthernetPort>>>) {
+        for e in ethernet_ports {
+            self.add(e);
         }
     }
 
@@ -86,11 +81,13 @@ impl EthernetPort {
     }
 
     /// Appends the data to the outgoing buffer.
+    /// * `data` - The data to append to the outgoing buffer.
     pub fn send(&mut self, data: Vec<u8>) {
         self.outgoing_buffer.push(data);
     }
 
     /// Clears the outgoing buffer and appends it to the other's incoming buffer.
+    /// * `consumable` - The port to consume the outgoing buffer.
     pub fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {
         consumable.incoming_buffer.append(&mut self.outgoing_buffer);
     }
@@ -105,7 +102,7 @@ impl EthernetPort {
 
     /// Returns true if there are bytes in the incoming buffer.
     #[cfg(test)]
-    pub fn has_outgoing(&self) -> bool {
+    pub(crate) fn has_outgoing(&self) -> bool {
         !self.outgoing_buffer.is_empty()
     }
 }

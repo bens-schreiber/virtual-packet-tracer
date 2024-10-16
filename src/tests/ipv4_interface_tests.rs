@@ -19,7 +19,7 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
     // Act
-    let i1_sent = i1.send(i2.ip_address(), eth2_data!(1));
+    let i1_sent = i1.send(i2.ip_address, eth2_data!(1));
     sim.tick();
 
     let i1_data = i1.ethernet.receive();
@@ -38,9 +38,9 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
             ArpFrame::new(
                 ArpOperation::Request,
                 i1.ethernet.mac_address,
-                i1.ip_address(),
+                i1.ip_address,
                 mac_addr!(0),
-                i2.ip_address()
+                i2.ip_address
             )
             .to_bytes(),
             EtherType::Arp
@@ -60,7 +60,7 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
     // Act
-    i1.send(i2.ip_address(), eth2_data!(1)); // Fails, sends ARP request
+    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
     sim.tick();
 
     i2.receive(); // Sends ARP reply
@@ -79,9 +79,9 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
             ArpFrame::new(
                 ArpOperation::Reply,
                 i2.ethernet.mac_address,
-                i2.ip_address(),
+                i2.ip_address,
                 i1.ethernet.mac_address,
-                i1.ip_address()
+                i1.ip_address
             )
             .to_bytes(),
             EtherType::Arp
@@ -100,14 +100,14 @@ fn Send_Uni_ReceivesIpv4Frame() {
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
-    i1.send(i2.ip_address(), eth2_data!(1)); // Fails, sends ARP request
+    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
     sim.tick();
     i2.receive(); // Sends ARP reply
     sim.tick();
     i1.receive(); // Process ARP reply
 
     // Act
-    let i1_sent = i1.send(i2.ip_address(), eth2_data!(1)); // Sends Ipv4 frame
+    let i1_sent = i1.send(i2.ip_address, eth2_data!(1)); // Sends Ipv4 frame
     sim.tick();
 
     let i2_data = i2.receive();
@@ -117,7 +117,7 @@ fn Send_Uni_ReceivesIpv4Frame() {
     assert!(i2_data.len() == 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address(), i2.ip_address(), eth2_data!(1))
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, eth2_data!(1))
     );
 }
 
@@ -132,15 +132,15 @@ fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
 
     EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
 
-    i1.send(i2.ip_address(), eth2_data!(1)); // Fails, sends ARP request
+    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
     sim.tick();
     i2.receive(); // Sends ARP reply
     sim.tick();
     i1.receive(); // Process ARP reply
 
     // Act
-    let i1_sent = i1.send(i2.ip_address(), eth2_data!(1)); // Sends Ipv4 frame
-    let i2_sent = i2.send(i1.ip_address(), eth2_data!(2)); // Sends Ipv4 frame
+    let i1_sent = i1.send(i2.ip_address, eth2_data!(1)); // Sends Ipv4 frame
+    let i2_sent = i2.send(i1.ip_address, eth2_data!(2)); // Sends Ipv4 frame
 
     // Assert
     assert!(i1_sent);

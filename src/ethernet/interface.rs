@@ -27,21 +27,26 @@ impl EthernetInterface {
         self.port.clone()
     }
 
-    /// Connects two EthernetInterfaces together via EthernetPorts (bi-directional).
+    /// Connects two EthernetInterfaces together via EthernetPorts
+    /// * `other` - The interface to establish a bidirectional connection with. (self -> other and other -> self)
     pub fn connect(&self, other: &EthernetInterface) {
         EthernetPort::connect(&self.port, &other.port);
     }
 
     /// Sends data as EthernetII from this interface to the destination MAC address.
-    ///
-    /// The source MAC address is this interface's MAC address.
+    /// The source MAC address is assumed to be this interface's MAC address.
+    /// * `destination` - The destination MAC address to send the data to.
+    /// * `ether_type` - The EtherType field of the EthernetII frame.
+    /// * `data` - Byte data to send in the frame.
     pub fn send(&mut self, destination: MacAddress, ether_type: EtherType, data: Vec<u8>) {
         self.sendv(self.mac_address, destination, ether_type, data);
     }
 
     /// Sends data as EthernetII from this interface to the destination MAC address.
-    ///
-    /// The source MAC address is variable.
+    /// * `source` - The source MAC address to send the data from.
+    /// * `destination` - The destination MAC address to send the data to.
+    /// * `ether_type` - The EtherType field of the EthernetII frame.
+    /// * `data` - Byte data to send in the frame.
     pub fn sendv(
         &mut self,
         source: MacAddress,
@@ -54,12 +59,18 @@ impl EthernetInterface {
     }
 
     /// Sends data as Ethernet802_3 from this interface to the destination MAC address.
-    pub fn send802_3(&mut self, destination: MacAddress, data: Vec<u8>) {
+    /// The source MAC address is assumed to be this interface's MAC address.
+    /// * `destination` - The destination MAC address to send the data to.
+    /// * `data` - Byte data to send in the frame.
+    pub fn send8023(&mut self, destination: MacAddress, data: Vec<u8>) {
         let frame = Ethernet802_3Frame::new(destination, self.mac_address, data);
         self.port.borrow_mut().send(frame.to_bytes());
     }
 
     /// Broadcasts an ARP request to find the MAC address of the target IP address over EthernetII.
+    /// The source MAC address is assumed to be this interface's MAC address.
+    /// * `sender_ip` - The IP address of the sender.
+    /// * `target_ip` - The IP address of the target to find the MAC address of.
     pub fn arp_request(&mut self, sender_ip: Ipv4Address, target_ip: Ipv4Address) {
         let arp = ArpFrame::new(
             ArpOperation::Request,
@@ -74,6 +85,10 @@ impl EthernetInterface {
     }
 
     /// Unicasts an ARP reply to the destination MAC address over EthernetII.
+    /// The source MAC address is assumed to be this interface's MAC address.
+    /// * `sender_ip` - The IP address of the sender.
+    /// * `destination_mac` - The MAC address to send the reply to.
+    /// * `destination_ip` - The IP address of the destination to reply to.
     pub fn arp_reply(
         &mut self,
         sender_ip: Ipv4Address,
@@ -115,7 +130,7 @@ impl EthernetInterface {
 
     /// Returns a list of EthernetII frames that were received since the last call.
     #[cfg(test)]
-    pub fn receive_eth2(&mut self) -> Vec<Ethernet2Frame> {
+    pub(crate) fn receive_eth2(&mut self) -> Vec<Ethernet2Frame> {
         let frames = self.receive();
         let mut eth2_frames = Vec::new();
 

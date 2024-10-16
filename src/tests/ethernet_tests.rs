@@ -284,7 +284,7 @@ mod EthernetInterfaceTests {
 
         // Act
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-        i1.send802_3(i2.mac_address, eth802_3_data!(2));
+        i1.send8023(i2.mac_address, eth802_3_data!(2));
         sim.tick();
 
         let i2_data = i2.receive();

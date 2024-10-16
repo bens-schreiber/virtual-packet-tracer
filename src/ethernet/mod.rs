@@ -125,9 +125,6 @@ impl From<u16> for EtherType {
 }
 
 /// Ethernet II frame format
-///
-/// Used for all Ethernet frames except LLC frames
-///
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet2Frame {
     preamble: [u8; 7],
@@ -159,7 +156,6 @@ impl Ethernet2Frame {
 }
 
 impl ByteSerialize for Ethernet2Frame {
-    /// Creates an EthernetFrame from a byte array
     fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet2Frame, std::io::Error> {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(
@@ -208,7 +204,6 @@ impl ByteSerialize for Ethernet2Frame {
         })
     }
 
-    /// Converts the EthernetFrame to a byte array
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         let ether_type = self.ether_type.clone() as u16;
@@ -226,9 +221,6 @@ impl ByteSerialize for Ethernet2Frame {
 }
 
 /// IEEE 802.3 Ethernet Frame
-///
-/// Used only for LLC frames
-///
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet802_3Frame {
     preamble: [u8; 7],
@@ -265,7 +257,6 @@ impl Ethernet802_3Frame {
 }
 
 impl ByteSerialize for Ethernet802_3Frame {
-    /// Creates an EthernetFrame from a byte array
     fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error> {
         if bytes.len() < 64 {
             return Err(std::io::Error::new(
@@ -337,12 +328,13 @@ impl ByteSerialize for Ethernet802_3Frame {
     }
 }
 
-/// Can be converted to and from a byte array
 pub trait ByteSerialize {
+    // Convert the struct to a byte array
     fn to_bytes(&self) -> Vec<u8> {
         Vec::new()
     }
 
+    // Convert a byte array to a struct
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error>
     where
         Self: Sized;

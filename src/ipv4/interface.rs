@@ -9,7 +9,7 @@ use crate::ethernet::*;
 /// Contains an ARP table to map IP addresses to MAC addresses.
 pub struct Ipv4Interface {
     pub ethernet: EthernetInterface,
-    ip_address: Ipv4Address,
+    pub ip_address: Ipv4Address,
     arp_table: HashMap<Ipv4Address, MacAddress>,
 }
 
@@ -22,10 +22,6 @@ impl Ipv4Interface {
         }
     }
 
-    pub fn ip_address(&self) -> Ipv4Address {
-        self.ip_address
-    }
-
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
     ///
     /// If the MAC address of the destination IP address is not in the ARP table, an ARP request is sent.
@@ -33,6 +29,9 @@ impl Ipv4Interface {
     /// Returns true if the data was sent successfully.
     ///
     /// Returns false if the MAC address of the destination IP address is not in the ARP table.
+    ///
+    /// * `destination` - The destination IP address to send the data to.
+    /// * `data` - Byte data to send in the frame.
     pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
         if let Some(mac_address) = self.arp_table.get(&destination) {
             let bytes = Ipv4Frame::new(self.ip_address, destination, data).to_bytes();
