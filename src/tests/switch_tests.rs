@@ -415,15 +415,21 @@ fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBloc
     // Act
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1)); // Should have to traverse i1 -> s3 -> s1 -> s2 -> i2
     i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2)); // Should have to traverse i2 -> s2 -> s1 -> s3 -> i1
-    sim.tick();
 
     for _ in 0..3 {
-        // unscientifically determined number of iterations to converge
+        sim.tick();
         s1.forward();
         s2.forward();
         s3.forward();
-        sim.tick();
+
+        assert!(i1.receive().is_empty());
+        assert!(i2.receive().is_empty());
     }
+
+    s1.forward();
+    s2.forward();
+    s3.forward();
+    sim.tick();
 
     let i1_data = i1.receive();
     let i2_data = i2.receive();
