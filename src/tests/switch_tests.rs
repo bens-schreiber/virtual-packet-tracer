@@ -6,7 +6,7 @@ use crate::ethernet::{interface::*, ByteSerialize, EtherType, EthernetFrame};
 use crate::{bridge_id, eth2, eth2_data, mac_addr, mac_bpdu_addr, mac_broadcast_addr};
 
 #[test]
-pub fn Switch_ReceiveNotInTable_FloodsFrame() {
+pub fn Forward_ReceiveNotInTable_FloodsFrame() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -59,7 +59,7 @@ pub fn Switch_ReceiveNotInTable_FloodsFrame() {
 }
 
 #[test]
-pub fn Switch_ReceiveInTable_ForwardsFrame() {
+pub fn Forward_ReceiveInTable_ForwardsFrame() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -107,7 +107,7 @@ pub fn Switch_ReceiveInTable_ForwardsFrame() {
 }
 
 #[test]
-fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
+fn Forward_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -169,7 +169,7 @@ fn Switch_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
 }
 
 #[test]
-fn Switch_SpanningTree_SendsBpduDuringInitialization() {
+fn SpanningTree_Init_SendsBpdus() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -215,39 +215,7 @@ fn Switch_SpanningTree_SendsBpduDuringInitialization() {
 }
 
 #[test]
-fn Switch_SpanningTreeTwoSwitches_ElectsRootPortAndDesignatedPorts() {
-    // Arrange
-    let mut sim = CableSimulator::new();
-    let mut s1 = Switch::from_seed(1, 1);
-    let mut s2 = Switch::from_seed(35, 2);
-
-    let s1_port = 0;
-    let s2_port = 1;
-    s1.connect_switch(s1_port, &mut s2, s2_port);
-
-    sim.adds(s1.ports());
-    sim.adds(s2.ports());
-
-    // Act
-    s1.init_stp();
-    s2.init_stp();
-    sim.tick();
-    s1.forward();
-    s2.forward();
-    sim.tick();
-    s1.finish_init_stp();
-    s2.finish_init_stp();
-
-    // Assert
-    let root_bid = bridge_id!(s1.mac_address, s1.bridge_priority);
-    assert!(s1.root_bid == root_bid);
-    assert!(s2.root_bid == root_bid);
-    assert!(s1.root_port == None);
-    assert!(s2.root_port == Some(s2_port));
-}
-
-#[test]
-fn Switch_SpanningTree_DiscardsEndDevicesDuringInit() {
+fn SpanningTree_Init_DiscardsEndDevices() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -274,7 +242,7 @@ fn Switch_SpanningTree_DiscardsEndDevicesDuringInit() {
 }
 
 #[test]
-fn Switch_SpanningTree_ForwardsEndDevicesAfterInit() {
+fn SpanningTree_FinishInit_ForwardsEndDevices() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -300,4 +268,102 @@ fn Switch_SpanningTree_ForwardsEndDevicesAfterInit() {
 
     // Assert
     assert!(i1_data.len() == 1);
+}
+
+#[test]
+fn SpanningTree_BiConnect_ElectsRootPortAndDesignatedPort() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(35, 2);
+
+    let s1_port = 0;
+    let s2_port = 1;
+    s1.connect_switch(s1_port, &mut s2, s2_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+
+    // Act
+    s1.init_stp();
+    s2.init_stp();
+    sim.tick();
+    s1.forward();
+    s2.forward();
+    sim.tick();
+    s1.finish_init_stp();
+    s2.finish_init_stp();
+
+    // Assert
+    assert!(s1.root_port.is_none());
+    assert!(s1.root_bid == s1.bid());
+    // assert!(s1.designated_ports().len() == 1);
+    assert!(s1.designated_ports().contains(&s1_port));
+    assert!(s1.disabled_ports().len() == 0);
+
+    assert!(s2.root_bid == s1.bid());
+    assert!(s2.root_port == Some(s2_port));
+    // assert!(s2.designated_ports().len() == 1);
+    assert!(!s2.designated_ports().contains(&s2_port));
+}
+
+#[test]
+fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(33, 2);
+    let mut s3 = Switch::from_seed(65, 3);
+
+    let s1_s2_port = 0;
+    let s1_s3_port = 1;
+
+    let s2_s1_port = 0;
+    let s2_s3_port = 1;
+
+    let s3_s1_port = 0;
+    let s3_s2_port = 1;
+
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
+    s1.connect_switch(s1_s3_port, &mut s3, s3_s1_port);
+    s2.connect_switch(s2_s3_port, &mut s3, s3_s2_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+    sim.adds(s3.ports());
+
+    // Act
+    s1.init_stp();
+    s2.init_stp();
+    s3.init_stp();
+
+    for _ in 0..10 {
+        // unscientifically determined number of iterations to converge
+        sim.tick();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+    }
+
+    s1.finish_init_stp();
+    s2.finish_init_stp();
+    s3.finish_init_stp();
+
+    // Assert
+    assert!(s1.root_bid == s1.bid());
+    assert!(s1.root_port.is_none());
+    assert!(
+        s1.designated_ports().contains(&s1_s2_port) && s1.designated_ports().contains(&s1_s3_port)
+    );
+    assert!(s1.disabled_ports().len() == 0);
+
+    assert!(s2.root_bid == s1.bid());
+    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(s2.designated_ports().contains(&s2_s3_port));
+    assert!(s2.disabled_ports().len() == 0);
+
+    assert!(s3.root_bid == s1.bid());
+    assert!(s3.root_port == Some(s3_s1_port));
+    assert!(!s3.designated_ports().contains(&s3_s2_port));
+    assert!(s3.disabled_ports().contains(&s3_s2_port));
 }

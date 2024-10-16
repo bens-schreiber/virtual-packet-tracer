@@ -7,7 +7,15 @@ use crate::{
 
 use super::cable::*;
 
-/// Spanning Tree Protocol (STP) Port States
+#[derive(Debug, PartialEq)]
+enum StpPortRole {
+    Root,
+    Designated,
+    Alternate,
+    Backup,
+    Disabled,
+}
+
 #[derive(Debug, PartialEq)]
 enum StpPortState {
     Discarding, // No forwarded frames, receives and transmits bpdus, no learning mac addresses
@@ -20,6 +28,7 @@ enum StpPortState {
 struct StpPort {
     interface: EthernetInterface,
     stp_state: StpPortState,
+    stp_role: StpPortRole,
     id: u16,
 }
 
@@ -32,17 +41,19 @@ pub struct Switch {
     ports: [RefCell<StpPort>; 32],     // 32 physical ports
     table: HashMap<MacAddress, usize>, // maps an address to the interface it's connected to.
 
-    // Bridge Protocol Data Unit (BPDU) fields
     pub mac_address: MacAddress,
-    pub bridge_priority: u16,
-    pub root_bid: u64,
-    pub root_cost: u32,
-    pub root_port: Option<usize>,
+    pub bridge_priority: u16, // The priority of the switch in the spanning tree protocol. Lowest priority is the root bridge.
+
+    pub root_bid: u64,  // Root Bridge ID = Root MAC Address + Root Priority
+    pub root_cost: u32, // The cost of the path to the root bridge ; 0 for the root bridge
+    pub root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
+
     pub responds_to_bpdu: u32, // A bitmap that indicates which ports respond to BPDUs
 }
 
 impl Switch {
-    /// Creates a new switch with 32 interfaces, each with a unique MAC address based on the given seed.
+    /// Creates a new switch with 32 interfaces, each with a unique MAC address based on the given seed. All ports assume they
+    /// are designated ports. The switch is assumed to be the root bridge.
     ///
     /// * `mac_seed` - The seed for the MAC addresses of the interfaces. Will take the range [mac_seed, mac_seed + 32].
     /// * `bridge_priority` - The priority of the switch in the spanning tree protocol.
@@ -52,6 +63,7 @@ impl Switch {
                 RefCell::new(StpPort {
                     interface: EthernetInterface::new(mac_addr!(mac_seed + i + 1)),
                     stp_state: StpPortState::Forwarding,
+                    stp_role: StpPortRole::Designated,
                     id: i as u16,
                 })
             })
@@ -64,19 +76,15 @@ impl Switch {
             table: HashMap::new(),
             bridge_priority,
             mac_address: mac_addr!(mac_seed),
-            root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority),
+            root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority), // Assume the switch is the root bridge
             root_cost: 0,
             root_port: None,
             responds_to_bpdu: 0,
         }
     }
 
-    /// Returns a list of all the EthernetPorts connected to the switch.
-    pub fn ports(&self) -> Vec<Rc<RefCell<EthernetPort>>> {
-        self.ports
-            .iter()
-            .map(|i| i.borrow().interface.port())
-            .collect()
+    pub fn bid(&self) -> u64 {
+        crate::bridge_id!(self.mac_address, self.bridge_priority)
     }
 
     /// Connects two ports together via EthernetPorts (bi-directional).
@@ -114,7 +122,7 @@ impl Switch {
 
         // Flood BPDU frames to all interfaces
         for port in self.ports.iter() {
-            bpdu.port_id = port.borrow().id;
+            bpdu.port = port.borrow().id;
             port.borrow_mut()
                 .interface
                 .send802_3(crate::mac_bpdu_addr!(), bpdu.to_bytes());
@@ -168,7 +176,9 @@ impl Switch {
 
                         // Destination isn't in table, flood to all interfaces (except the one it came from)
                         for (i, other_interface) in self.ports.iter().enumerate() {
-                            if i == port {
+                            if i == port
+                                || other_interface.borrow().stp_role == StpPortRole::Disabled
+                            {
                                 continue;
                             }
 
@@ -188,19 +198,34 @@ impl Switch {
                             Err(_) => continue,
                         };
 
-                        if bpdu.root_id >= self.root_bid {
-                            return;
+                        // This port sends BPDUs, mark as a switch
+                        self.responds_to_bpdu |= 1 << port;
+
+                        // If our BID is less than the incoming BID, this port should be designated. Else, disable.
+                        if self.bid() < bpdu.bid {
+                            self.ports[port].borrow_mut().stp_role = StpPortRole::Designated;
+                            self.ports[port].borrow_mut().stp_state = StpPortState::Learning;
+                        } else {
+                            self.ports[port].borrow_mut().stp_role = StpPortRole::Disabled;
+                            self.ports[port].borrow_mut().stp_state = StpPortState::Discarding;
                         }
 
-                        self.root_bid = bpdu.root_id;
-                        self.root_cost = bpdu.root_path_cost + 1;
-                        self.root_port = Some(port);
-                        self.responds_to_bpdu |= 1 << port;
-                        self.ports[port].borrow_mut().stp_state = StpPortState::Learning;
+                        if self.root_bid <= bpdu.root_bid {
+                            continue; // Not fit to be the new root bridge
+                        }
 
-                        // Flood bpdu to all interfaces
+                        // Elect a new root bridge
+                        self.root_bid = bpdu.root_bid;
+                        self.root_cost = bpdu.root_cost + 1;
+                        self.root_port = Some(port);
+                        self.ports[port].borrow_mut().stp_state = StpPortState::Learning;
+                        self.ports[port].borrow_mut().stp_role = StpPortRole::Root;
+
+                        // Broadcast the new root bridge to all other interfaces
                         for (i, other_interface) in self.ports.iter().enumerate() {
-                            if i == port {
+                            if i == port
+                                || other_interface.borrow().stp_role == StpPortRole::Disabled
+                            {
                                 continue;
                             }
 
@@ -221,6 +246,36 @@ impl Switch {
                 };
             }
         }
+    }
+
+    /// Returns a list of all the EthernetPorts connected to the switch.
+    pub fn ports(&self) -> Vec<Rc<RefCell<EthernetPort>>> {
+        self.ports
+            .iter()
+            .map(|i| i.borrow().interface.port())
+            .collect()
+    }
+
+    /// Returns all ports in the designated role.
+    #[cfg(test)]
+    pub(crate) fn designated_ports(&self) -> Vec<usize> {
+        self.ports
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.borrow().stp_role == StpPortRole::Designated)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// Returns all ports in the disabled role.
+    #[cfg(test)]
+    pub(crate) fn disabled_ports(&self) -> Vec<usize> {
+        self.ports
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.borrow().stp_role == StpPortRole::Disabled)
+            .map(|(i, _)| i)
+            .collect()
     }
 }
 
@@ -252,10 +307,10 @@ pub struct BpduFrame {
     version: u8,      // 0x00 for STP, 0x02 for RSTP. Always 0x02 in this implementation.
     bpdu_type: u8,    // 0x00 for Configuration BPDU, 0x02 for TCN BPDU
     flags: u8,
-    root_id: u64,        // Bridge ID = Root MAC Address + Root Priority
-    root_path_cost: u32, // The cost of the path to the root bridge
-    bridge_id: u64,      // Bridge ID = Bridge MAC Address + Bridge Priority
-    port_id: u16,        // Port ID = Port Priority + Port Number
+    root_bid: u64,  // Bridge ID = Root MAC Address + Root Priority
+    root_cost: u32, // The cost of the path to the root bridge
+    bid: u64,       // Bridge ID = Bridge MAC Address + Bridge Priority
+    port: u16,      // Port ID = Port Priority + Port Number
     message_age: u16,
     max_age: u16,
     hello_time: u16,
@@ -312,10 +367,10 @@ impl BpduFrame {
         source_address: MacAddress,
         config_type: bool,
         flags: u8,
-        root_bridge_id: u64,
-        root_path_cost: u32,
-        bridge_id: u64,
-        port_id: u16,
+        root_bid: u64,
+        root_cost: u32,
+        bid: u64,
+        port: u16,
     ) -> BpduFrame {
         let bpdu_type = if config_type { 0x02 } else { 0x00 };
 
@@ -326,10 +381,10 @@ impl BpduFrame {
             version: 2,          // RSTP
             bpdu_type,           // Configuration or TCN BPDU
             flags,
-            root_id: root_bridge_id,
-            root_path_cost,
-            bridge_id,
-            port_id,
+            root_bid,
+            root_cost,
+            bid,
+            port,
 
             // TODO: Implement timers
             message_age: 0,
@@ -341,20 +396,20 @@ impl BpduFrame {
 
     pub fn hello(
         source_address: MacAddress,
-        root_bridge_id: u64,
-        root_path_cost: u32,
-        bridge_id: u64,
-        port_id: u16,
+        root_bid: u64,
+        root_cost: u32,
+        bid: u64,
+        port: u16,
     ) -> BpduFrame {
         BpduFrame::new(
             crate::mac_bpdu_addr!(),
             source_address,
             false,
             BpduFrame::flags(false, false, 1, false, true, false),
-            root_bridge_id,
-            root_path_cost,
-            bridge_id,
-            port_id,
+            root_bid,
+            root_cost,
+            bid,
+            port,
         )
     }
 }
@@ -390,10 +445,10 @@ impl ByteSerialize for BpduFrame {
             version,
             bpdu_type,
             flags,
-            root_id,
-            root_path_cost,
-            bridge_id,
-            port_id,
+            root_bid: root_id,
+            root_cost: root_path_cost,
+            bid: bridge_id,
+            port: port_id,
             message_age,
             max_age,
             hello_time,
@@ -410,10 +465,10 @@ impl ByteSerialize for BpduFrame {
         bytes.push(self.version);
         bytes.push(self.bpdu_type);
         bytes.push(self.flags);
-        bytes.extend_from_slice(&self.root_id.to_be_bytes());
-        bytes.extend_from_slice(&self.root_path_cost.to_be_bytes());
-        bytes.extend_from_slice(&self.bridge_id.to_be_bytes());
-        bytes.extend_from_slice(&self.port_id.to_be_bytes());
+        bytes.extend_from_slice(&self.root_bid.to_be_bytes());
+        bytes.extend_from_slice(&self.root_cost.to_be_bytes());
+        bytes.extend_from_slice(&self.bid.to_be_bytes());
+        bytes.extend_from_slice(&self.port.to_be_bytes());
         bytes.extend_from_slice(&self.message_age.to_be_bytes());
         bytes.extend_from_slice(&self.max_age.to_be_bytes());
         bytes.extend_from_slice(&self.hello_time.to_be_bytes());
