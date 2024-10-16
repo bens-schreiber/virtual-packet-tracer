@@ -122,19 +122,7 @@ mod EthernetInterfaceTests {
     use super::*;
 
     #[test]
-    fn EthernetInterface_Receive_ReturnsEmptyVecWhenNoData() {
-        // Arrange
-        let mut i1 = EthernetInterface::new(mac_addr!(1));
-
-        // Act
-        let i1_data = i1.receive();
-
-        // Assert
-        assert!(i1_data.is_empty());
-    }
-
-    #[test]
-    fn EthernetInterface_SendUni_ReceivesFrame() {
+    fn Send_Uni_ReceiveFrame() {
         // Arrange
         let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -167,7 +155,7 @@ mod EthernetInterfaceTests {
     }
 
     #[test]
-    fn EthernetInterface_SendBi_ReceivesFrames() {
+    fn Send_Bi_ReceivesFrames() {
         // Arrange
         let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -211,7 +199,7 @@ mod EthernetInterfaceTests {
     }
 
     #[test]
-    fn EthernetInterface_SendUniMult_ReceivesAllData() {
+    fn Send_MultipleUniFrames_ReceiveAllData() {
         // Arrange
         let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -236,7 +224,7 @@ mod EthernetInterfaceTests {
     }
 
     #[test]
-    fn EthernetInterface_SendBiMult_ReceivesAllData() {
+    fn Send_MultipleBiFrames_ReceivesAllData() {
         // Arrange
         let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
@@ -272,7 +260,19 @@ mod EthernetInterfaceTests {
     }
 
     #[test]
-    fn EthernetInterface_ReceiveEthernet2AndEthernet8023_ReturnsBothFrames() {
+    fn Receive_NoData_ReturnsEmptyVec() {
+        // Arrange
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+
+        // Act
+        let i1_data = i1.receive();
+
+        // Assert
+        assert!(i1_data.is_empty());
+    }
+
+    #[test]
+    fn Receive_Ethernet2AndEthernet8023_ReturnsBothFrames() {
         // Arrange
         let mut sim = CableSimulator::new();
         let mut i1 = EthernetInterface::new(mac_addr!(1));
