@@ -31,7 +31,7 @@ impl CableSimulator {
     /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
     ///
     /// All data in this simulation is moved in a single tick, thus the simulator is synchronous.
-    pub fn tick(&mut self) {
+    pub fn tick(&self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
 

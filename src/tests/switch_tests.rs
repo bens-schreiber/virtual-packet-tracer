@@ -3,7 +3,7 @@
 use crate::device::cable::CableSimulator;
 use crate::device::switch::{BpduFrame, Switch};
 use crate::ethernet::{interface::*, ByteSerialize, EtherType, EthernetFrame};
-use crate::{bridge_id, eth2, eth2_data, mac_addr, mac_bpdu_addr, mac_broadcast_addr};
+use crate::{eth2, eth2_data, mac_addr, mac_bpdu_addr, mac_broadcast_addr};
 
 #[test]
 pub fn Forward_ReceiveNotInTable_FloodsFrame() {
@@ -184,7 +184,6 @@ fn SpanningTree_Init_SendsBpdus() {
     // Act
     switch.init_stp();
     sim.tick();
-    switch.finish_init_stp();
 
     let i1_data = i1.receive();
 
@@ -204,11 +203,14 @@ fn SpanningTree_Init_SendsBpdus() {
 
     assert_eq!(
         bpdu,
-        BpduFrame::hello(
+        BpduFrame::new(
+            mac_bpdu_addr!(),
             switch.mac_address,
-            bridge_id!(switch.mac_address, switch.bridge_priority),
+            false,
+            BpduFrame::flags(true, true, 4, false, false, false),
+            switch.bid(),
             0,
-            bridge_id!(switch.mac_address, switch.bridge_priority),
+            switch.bid(),
             switch_port as u16
         )
     )
@@ -232,13 +234,60 @@ fn SpanningTree_Init_DiscardsEndDevices() {
     switch.init_stp();
     sim.tick();
     switch.forward();
-    switch.finish_init_stp();
     sim.tick();
 
     let i1_data = i1.receive_eth2();
 
     // Assert
     assert!(i1_data.is_empty());
+}
+
+#[test]
+fn SpanningTree_SingleSwitch_ElectsSelfAsRoot() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut switch = Switch::from_seed(1, 1);
+
+    sim.adds(switch.ports());
+
+    // Act
+    switch.init_stp();
+    sim.tick();
+    switch.forward();
+    sim.tick();
+    switch.finish_stp();
+
+    // Assert
+    assert!(switch.is_root_bridge());
+    assert!(switch.root_port.is_none());
+    assert!(switch.designated_ports().len() == 32);
+}
+
+#[test]
+fn SpanningTree_FinishInit_NoMoreBpdus() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut switch = Switch::from_seed(1, 1);
+
+    sim.adds(switch.ports());
+
+    // Act
+    switch.init_stp();
+    let has_outgoing1 = switch.ports()[0].borrow().has_outgoing();
+    sim.tick();
+
+    switch.forward();
+    let has_outgoing2 = switch.ports()[0].borrow().has_outgoing();
+    sim.tick();
+
+    switch.finish_stp();
+    let has_outgoing3 = switch.ports()[0].borrow().has_outgoing();
+    sim.tick();
+
+    // Assert
+    assert!(has_outgoing1);
+    assert!(!has_outgoing2);
+    assert!(!has_outgoing3);
 }
 
 #[test]
@@ -257,9 +306,11 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
     // Act
     switch.init_stp();
     sim.tick();
+
     switch.forward();
-    switch.finish_init_stp();
     i1.send(i1.mac_address, EtherType::Debug, eth2_data!(1)); // attempt to send data to self
+    switch.finish_stp();
+
     sim.tick();
     switch.forward();
     sim.tick();
@@ -271,15 +322,58 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
 }
 
 #[test]
-fn SpanningTree_BiConnect_ElectsRootPortAndDesignatedPort() {
+fn SpanningTree_TwoConnectedFinishStp_BpdusEnd() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut s1 = Switch::from_seed(1, 1);
     let mut s2 = Switch::from_seed(35, 2);
 
-    let s1_port = 0;
-    let s2_port = 1;
-    s1.connect_switch(s1_port, &mut s2, s2_port);
+    let s1_s2_port = 0;
+    let s2_s1_port = 1;
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+
+    // Act
+    s1.init_stp();
+    s2.init_stp();
+    let s1_has_outgoing1 = s1.ports()[0].borrow().has_outgoing();
+    let s2_has_outgoing1 = s2.ports()[1].borrow().has_outgoing();
+
+    sim.tick();
+    s1.forward();
+    s2.forward();
+    let s1_has_outgoing2 = s1.ports()[0].borrow().has_outgoing();
+    let s2_has_outgoing2 = s2.ports()[1].borrow().has_outgoing();
+
+    sim.tick();
+    s1.finish_stp();
+    s2.finish_stp();
+    let s1_has_outgoing3 = s1.ports()[0].borrow().has_outgoing();
+    let s2_has_outgoing3 = s2.ports()[1].borrow().has_outgoing();
+
+    // Assert
+    assert!(s1_has_outgoing1);
+    assert!(s2_has_outgoing1);
+
+    assert!(s1_has_outgoing2);
+    assert!(s2_has_outgoing2);
+
+    assert!(!s1_has_outgoing3);
+    assert!(!s2_has_outgoing3);
+}
+
+#[test]
+fn SpanningTree_TwoConnectedFinishStp_ElectsRootPortAndDesignatedPort() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(35, 2);
+
+    let s1_s2_port = 0;
+    let s2_s1_port = 1;
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
 
     sim.adds(s1.ports());
     sim.adds(s2.ports());
@@ -291,29 +385,85 @@ fn SpanningTree_BiConnect_ElectsRootPortAndDesignatedPort() {
     s1.forward();
     s2.forward();
     sim.tick();
-    s1.finish_init_stp();
-    s2.finish_init_stp();
+    s1.finish_stp();
+    s2.finish_stp();
 
     // Assert
     assert!(s1.root_port.is_none());
-    assert!(s1.root_bid == s1.bid());
-    // assert!(s1.designated_ports().len() == 1);
-    assert!(s1.designated_ports().contains(&s1_port));
-    assert!(s1.disabled_ports().len() == 0);
+    assert!(s1.is_root_bridge());
+    assert!(s1.root_cost == 0);
+    assert!(s1.designated_ports().contains(&s1_s2_port));
+    assert!(s1.discarding_ports().len() == 0);
 
     assert!(s2.root_bid == s1.bid());
-    assert!(s2.root_port == Some(s2_port));
-    // assert!(s2.designated_ports().len() == 1);
-    assert!(!s2.designated_ports().contains(&s2_port));
+    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(!s2.designated_ports().contains(&s2_s1_port));
+    assert!(s2.discarding_ports().len() == 0);
 }
 
 #[test]
-fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts() {
+fn SpanningTree_BiConnectEquivalentPriorities_ElectsWithBidTiebreaker() {
     // Arrange
     let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(100, 1); // Same priority, higher mac address
+    let mut s2 = Switch::from_seed(35, 1); // Same priority, lower mac address    => S2 should win
+
+    let s1_s2_port = 0;
+    let s2_s1_port = 1;
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+
+    // Act
+    s1.init_stp();
+    s2.init_stp();
+    sim.tick();
+    s1.forward();
+    s2.forward();
+    sim.tick();
+    s1.finish_stp();
+    s2.finish_stp();
+
+    // Assert
+    assert!(s1.root_port == Some(s1_s2_port));
+    assert!(s1.root_bid == s2.bid());
+    assert!(s1.root_cost == 1);
+    assert!(!s1.designated_ports().contains(&s1_s2_port));
+    assert!(s1.discarding_ports().len() == 0);
+
+    assert!(s2.is_root_bridge());
+    assert!(s2.root_port == None);
+    assert!(s2.designated_ports().contains(&s2_s1_port));
+    assert!(s2.discarding_ports().len() == 0);
+}
+
+// Helper for creating a complete graph topology (3 switches and 2 end devices
+//      s1
+//     /  \
+// i2-s2---s3-i1
+//
+// Initializes and finishes the spanning tree protocol
+fn complete_network() -> (
+    CableSimulator,
+    Switch,
+    Switch,
+    Switch,
+    EthernetInterface,
+    EthernetInterface,
+    (usize, usize, usize, usize, usize, usize),
+) {
+    let mut sim = CableSimulator::new();
+
     let mut s1 = Switch::from_seed(1, 1);
+    s1.set_debug_tag(1);
     let mut s2 = Switch::from_seed(33, 2);
+    s2.set_debug_tag(2);
     let mut s3 = Switch::from_seed(65, 3);
+    s3.set_debug_tag(3);
+
+    let mut i1 = EthernetInterface::new(mac_addr!(100));
+    let mut i2 = EthernetInterface::new(mac_addr!(200));
 
     let s1_s2_port = 0;
     let s1_s3_port = 1;
@@ -328,65 +478,6 @@ fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts()
     s1.connect_switch(s1_s3_port, &mut s3, s3_s1_port);
     s2.connect_switch(s2_s3_port, &mut s3, s3_s2_port);
 
-    sim.adds(s1.ports());
-    sim.adds(s2.ports());
-    sim.adds(s3.ports());
-
-    // Act
-    s1.init_stp();
-    s2.init_stp();
-    s3.init_stp();
-
-    for _ in 0..10 {
-        // unscientifically determined number of iterations to converge
-        sim.tick();
-        s1.forward();
-        s2.forward();
-        s3.forward();
-    }
-
-    s1.finish_init_stp();
-    s2.finish_init_stp();
-    s3.finish_init_stp();
-
-    // Assert
-    assert!(s1.root_bid == s1.bid());
-    assert!(s1.root_port.is_none());
-    assert!(
-        s1.designated_ports().contains(&s1_s2_port) && s1.designated_ports().contains(&s1_s3_port)
-    );
-    assert!(s1.disabled_ports().len() == 0);
-
-    assert!(s2.root_bid == s1.bid());
-    assert!(s2.root_port == Some(s2_s1_port));
-    assert!(s2.designated_ports().contains(&s2_s3_port));
-    assert!(s2.disabled_ports().len() == 0);
-
-    assert!(s3.root_bid == s1.bid());
-    assert!(s3.root_port == Some(s3_s1_port));
-    assert!(!s3.designated_ports().contains(&s3_s2_port));
-    assert!(s3.disabled_ports().contains(&s3_s2_port));
-}
-
-// ****************************************************************************************************
-// Full integration test for the spanning tree protocol: Can we avoid broadcast storms?
-// ****************************************************************************************************
-#[test]
-fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBlockedPort() {
-    // Arrange
-    let mut sim = CableSimulator::new();
-
-    let mut s1 = Switch::from_seed(1, 1);
-    let mut s2 = Switch::from_seed(33, 2);
-    let mut s3 = Switch::from_seed(65, 3);
-
-    let mut i1 = EthernetInterface::new(mac_addr!(100));
-    let mut i2 = EthernetInterface::new(mac_addr!(200));
-
-    s1.connect_switch(0, &mut s2, 0);
-    s1.connect_switch(1, &mut s3, 0);
-    s2.connect_switch(1, &mut s3, 1);
-
     s3.connect(3, &mut i1);
     s2.connect(2, &mut i2);
 
@@ -394,27 +485,182 @@ fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBloc
     sim.adds(s2.ports());
     sim.adds(s3.ports());
     sim.adds(vec![i1.port(), i2.port()]);
+    (
+        sim,
+        s1,
+        s2,
+        s3,
+        i1,
+        i2,
+        (
+            s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port,
+        ),
+    )
+}
+
+#[test]
+fn SpanningTree_CompleteNetwork_BpdusEnd() {
+    // Arrange
+    let (
+        sim,
+        mut s1,
+        mut s2,
+        mut s3,
+        _,
+        _,
+        (s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port),
+    ) = complete_network();
+
+    // Act
+    s1.init_stp();
+    s2.init_stp();
+    s3.init_stp();
+    let s1_has_outgoing_s2_1 = s1.ports()[s1_s2_port].borrow().has_outgoing();
+    let s1_has_outgoing_s3_1 = s1.ports()[s1_s3_port].borrow().has_outgoing();
+    let s2_has_outgoing_s1_1 = s2.ports()[s2_s1_port].borrow().has_outgoing();
+    let s2_has_outgoing_s3_1 = s2.ports()[s2_s3_port].borrow().has_outgoing();
+    let s3_has_outgoing_s1_1 = s3.ports()[s3_s1_port].borrow().has_outgoing();
+    let s3_has_outgoing_s2_1 = s3.ports()[s3_s2_port].borrow().has_outgoing();
+
+    sim.tick();
+    s1.forward();
+    s2.forward();
+    s3.forward();
+    let s1_has_outgoing_s2_2 = s1.ports()[s1_s2_port].borrow().has_outgoing();
+    let s1_has_outgoing_s3_2 = s1.ports()[s1_s3_port].borrow().has_outgoing();
+    let s2_has_outgoing_s1_2 = s2.ports()[s2_s1_port].borrow().has_outgoing();
+    let s2_has_outgoing_s3_2 = s2.ports()[s2_s3_port].borrow().has_outgoing();
+    let s3_has_outgoing_s1_2 = s3.ports()[s3_s1_port].borrow().has_outgoing();
+    let s3_has_outgoing_s2_2 = s3.ports()[s3_s2_port].borrow().has_outgoing();
+
+    sim.tick();
+    s1.forward();
+    s2.forward();
+    s3.forward();
+    let s1_has_outgoing_s2_3 = s1.ports()[s1_s2_port].borrow().has_outgoing();
+    let s1_has_outgoing_s3_3 = s1.ports()[s1_s3_port].borrow().has_outgoing();
+    let s2_has_outgoing_s1_3 = s2.ports()[s2_s1_port].borrow().has_outgoing();
+    let s2_has_outgoing_s3_3 = s2.ports()[s2_s3_port].borrow().has_outgoing();
+    let s3_has_outgoing_s1_3 = s3.ports()[s3_s1_port].borrow().has_outgoing();
+    let s3_has_outgoing_s2_3 = s3.ports()[s3_s2_port].borrow().has_outgoing();
+
+    // Assert
+    assert!(s1_has_outgoing_s2_1);
+    assert!(s1_has_outgoing_s3_1);
+    assert!(s2_has_outgoing_s1_1);
+    assert!(s2_has_outgoing_s3_1);
+    assert!(s3_has_outgoing_s1_1);
+    assert!(s3_has_outgoing_s2_1);
+
+    assert!(s1_has_outgoing_s2_2);
+    assert!(s1_has_outgoing_s3_2);
+    assert!(s2_has_outgoing_s1_2);
+    assert!(s2_has_outgoing_s3_2);
+    assert!(s3_has_outgoing_s1_2);
+    assert!(s3_has_outgoing_s2_2);
+
+    assert!(!s1_has_outgoing_s2_3); // Everything settled
+    assert!(!s1_has_outgoing_s3_3);
+    assert!(!s2_has_outgoing_s1_3);
+    assert!(!s2_has_outgoing_s3_3);
+    assert!(!s3_has_outgoing_s1_3);
+    assert!(!s3_has_outgoing_s2_3);
+}
+
+fn stp_complete_network() -> (
+    CableSimulator,
+    Switch,
+    Switch,
+    Switch,
+    EthernetInterface,
+    EthernetInterface,
+    (usize, usize, usize, usize, usize, usize),
+) {
+    let (
+        sim,
+        mut s1,
+        mut s2,
+        mut s3,
+        mut i1,
+        mut i2,
+        (s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port),
+    ) = complete_network();
 
     s1.init_stp();
     s2.init_stp();
     s3.init_stp();
 
-    for _ in 0..10 {
-        // unscientifically determined number of iterations to converge
+    for _ in 0..3 {
         sim.tick();
         s1.forward();
         s2.forward();
         s3.forward();
     }
-    s1.finish_init_stp();
-    s2.finish_init_stp();
-    s3.finish_init_stp();
     i1.receive(); // dump incoming data, just bpdu frames we don't care about
     i2.receive(); // dump incoming data, just bpdu frames we don't care about
+    s1.finish_stp();
+    s2.finish_stp();
+    s3.finish_stp();
+    (
+        sim,
+        s1,
+        s2,
+        s3,
+        i1,
+        i2,
+        (
+            s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port,
+        ),
+    )
+}
+
+#[test]
+fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts() {
+    // Arrange
+    let (
+        _,
+        s1,
+        s2,
+        s3,
+        _,
+        _,
+        (s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port),
+    ) = stp_complete_network();
+
+    // Assert
+    assert!(s1.is_root_bridge());
+    assert!(s1.root_port.is_none());
+    assert!(
+        s1.designated_ports().contains(&s1_s2_port) && s1.designated_ports().contains(&s1_s3_port)
+    );
+    assert!(s1.discarding_ports().len() == 0);
+
+    assert!(s2.root_bid == s1.bid());
+    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(s2.designated_ports().contains(&s2_s3_port));
+    assert!(s2.discarding_ports().len() == 0);
+
+    assert!(s3.root_bid == s1.bid());
+    assert!(s3.root_port == Some(s3_s1_port));
+    assert!(!s3.designated_ports().contains(&s3_s2_port));
+    assert!(s3.discarding_ports().contains(&s3_s2_port));
+}
+
+//                      (DP) s1 (DP)
+//                      /         \
+//                  (RP)           (RP)
+//      i2 --- (DP) s2 (DP)----(BP) s3 (DP) --- i1
+//
+// i1 to i2 = i1 -> s3 -> s1 -> s2 -> i2
+// i2 to i1 = i2 -> s2 -> s1 -> s3 -> i1
+#[test]
+fn SpanningTree_CompleteGraphFinishedStp_Ethernet2FramesDoNotUseBlockedPort() {
+    // Arrange
+    let (sim, mut s1, mut s2, mut s3, mut i1, mut i2, _) = stp_complete_network();
 
     // Act
-    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1)); // Should have to traverse i1 -> s3 -> s1 -> s2 -> i2
-    i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2)); // Should have to traverse i2 -> s2 -> s1 -> s3 -> i1
+    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
+    i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2));
 
     for _ in 0..3 {
         sim.tick();
@@ -426,9 +672,6 @@ fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBloc
         assert!(i2.receive().is_empty());
     }
 
-    s1.forward();
-    s2.forward();
-    s3.forward();
     sim.tick();
 
     let i1_data = i1.receive();
@@ -456,4 +699,103 @@ fn SpanningTree_CompleteGraphFinishedInitForwardFrame_FrameArrivedDoesNotUseBloc
             EtherType::Debug
         )
     );
+}
+
+#[test]
+fn SpanningTree_ExistingNetworkReceiveTcnBpdu_UpdateDesignatedPorts() {
+    // Arrange
+    //
+    //      s1
+    //     /  \
+    // i2-s2---s3-i1
+    //          |
+    //          s4
+    //
+    let (mut sim, mut s1, mut s2, mut s3, _, _, _) = stp_complete_network();
+    let mut s4 = Switch::from_seed(97, 4);
+    let s3_s4_port = 2;
+    let s4_s3_port = 0;
+
+    s3.connect_switch(s3_s4_port, &mut s4, s4_s3_port);
+    sim.adds(s4.ports());
+
+    // Act
+    s4.init_stp();
+    for _ in 0..10 {
+        sim.tick();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+        s4.forward();
+    }
+
+    // Assert
+    assert!(s3.designated_ports().contains(&s3_s4_port));
+
+    assert!(s4.root_bid == s1.bid());
+    assert!(s4.root_port == Some(s4_s3_port));
+}
+
+#[test]
+fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
+    // Arrange
+    //
+    //      s1
+    //     /  \
+    // i2-s2---s3-i1
+    //          |
+    //          s4
+    //
+    let (
+        mut sim,
+        mut s1,
+        mut s2,
+        mut s3,
+        _,
+        _,
+        (s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port),
+    ) = stp_complete_network();
+    let mut s4 = Switch::from_seed(97, 0);
+    let s3_s4_port = 2;
+    let s4_s3_port = 0;
+
+    s3.connect_switch(s3_s4_port, &mut s4, s4_s3_port);
+    sim.adds(s4.ports());
+
+    // Act
+    s4.init_stp();
+    for _ in 0..100 {
+        sim.tick();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+        s4.forward();
+    }
+    s4.finish_stp();
+
+    // Assert
+    assert!(s4.root_bid == s4.bid());
+    assert!(s4.root_port.is_none());
+    assert!(s4.root_cost == 0);
+    assert!(s4.discarding_ports().len() == 0);
+    assert!(s4.designated_ports().contains(&s4_s3_port));
+
+    assert!(s3.root_bid == s4.bid());
+    assert!(s3.root_port == Some(s3_s4_port));
+    assert!(s3.root_cost == 1);
+    assert!(s3.discarding_ports().contains(&s3_s2_port));
+    assert!(s3.designated_ports().contains(&s3_s1_port));
+
+    assert!(s2.root_bid == s4.bid());
+    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(s2.root_cost == 3);
+    assert!(s2.discarding_ports().len() == 0);
+    assert!(s2.designated_ports().contains(&s2_s3_port));
+
+    assert!(s1.root_bid == s4.bid());
+    assert!(s1.root_port == Some(s1_s3_port));
+    assert!(s1.root_cost == 2);
+    assert!(s1.discarding_ports().len() == 0);
+    assert!(s1.designated_ports().contains(&s1_s2_port));
+    assert!(s1.designated_ports().contains(&s1_s3_port));
 }

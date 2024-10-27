@@ -5,7 +5,7 @@ use crate::ethernet::{interface::*, EtherType};
 use crate::{eth2_data, mac_addr};
 
 #[test]
-fn PhysicalSimulator_Tick_ConsumesAllOutgoing() {
+fn CableSimulator_Tick_ConsumesAllOutgoing() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
