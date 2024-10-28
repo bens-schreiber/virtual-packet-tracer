@@ -7,7 +7,7 @@ use crate::{
 
 use super::cable::*;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum StpPortRole {
     Root,       // The port that leads to the root bridge
     Designated, // The lowest cost path to the root bridge for a network segment
@@ -15,7 +15,7 @@ enum StpPortRole {
     Backup,     // A higher cost path to the root bridge for a network segment
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum StpPortState {
     Discarding, // No forwarded frames, receives and transmits bpdus, no learning mac addresses
     Learning,   // No forwarded frames, receives and transmits BPDUs, learning mac addresses
@@ -114,10 +114,13 @@ impl Switch {
     ///
     /// On a BPDU frame, it will update its port roles and states, and flood it's own BPDU if necessary.
     pub fn forward(&mut self) {
-        let mut valid_frames: Vec<(usize, EthernetFrame)> = vec![];
-
-        for (port_id, stp_port) in self.ports.iter().enumerate() {
-            let frames = stp_port.borrow_mut().interface.receive();
+        for i in 0..32 {
+            let (state, frames) = {
+                let mut p = self.ports[i].borrow_mut();
+                let state = p.stp_state;
+                let frames = p.interface.receive();
+                (state, frames)
+            };
 
             for frame in frames {
                 if is_mac_multicast_or_broadcast!(frame.source_address()) {
@@ -126,25 +129,14 @@ impl Switch {
 
                 match frame {
                     EthernetFrame::Ethernet2(f) => {
-                        if stp_port.borrow().stp_state != StpPortState::Discarding {
-                            valid_frames.push((port_id, EthernetFrame::Ethernet2(f)));
+                        if state != StpPortState::Discarding {
+                            self._receive_ethernet2(f, i);
                         }
                     }
-                    _ => {
-                        valid_frames.push((port_id, frame));
-                    }
-                }
-            }
-        }
-
-        // TODO: Rusts borrowing is making this difficult to abstract as I have unless there is this second loop.
-        // Although a technical inefficiency, the code is significantly more readable with _receive_ethernet2 and _receive_bpdu separated.
-        for (port, frame) in valid_frames {
-            match frame {
-                EthernetFrame::Ethernet2(f) => self._receive_ethernet2(f, port),
-                EthernetFrame::Ethernet802_3(f) => {
-                    if let Ok(bpdu) = BpduFrame::from_bytes(f.data) {
-                        self._receive_bpdu(bpdu, port);
+                    EthernetFrame::Ethernet802_3(f) => {
+                        if let Ok(bpdu) = BpduFrame::from_bytes(f.data) {
+                            self._receive_bpdu(bpdu, i);
+                        }
                     }
                 }
             }
@@ -356,7 +348,7 @@ impl Switch {
 
         let prev_role = {
             let mut sp = self.ports[port_id].borrow_mut();
-            let prev_role = sp.stp_role.clone();
+            let prev_role = sp.stp_role;
 
             // By default, the port will be designated and forwarding with no BID and root cost-- meaning it's an edge port.
             sp.stp_role = Some(StpPortRole::Designated);
@@ -561,7 +553,7 @@ impl Switch {
             }
 
             // Don't change redundant backup ports if the root bridge hasn't changed
-            let port_role = sp.stp_role.clone();
+            let port_role = sp.stp_role;
             if port_role.is_some_and(|r| r == StpPortRole::Backup) && !root_changed {
                 continue;
             }
