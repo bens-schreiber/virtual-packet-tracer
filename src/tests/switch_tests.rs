@@ -205,7 +205,7 @@ fn SpanningTree_Init_SendsBpdus() {
         bpdu,
         BpduFrame::new(
             mac_bpdu_addr!(),
-            switch.mac_address,
+            switch.mac_address(),
             false,
             BpduFrame::flags(true, true, 4, false, false, false),
             switch.bid(),
@@ -259,7 +259,7 @@ fn SpanningTree_SingleSwitch_ElectsSelfAsRoot() {
 
     // Assert
     assert!(switch.is_root_bridge());
-    assert!(switch.root_port.is_none());
+    assert!(switch.root_port().is_none());
     assert!(switch.designated_ports().len() == 32);
 }
 
@@ -389,14 +389,14 @@ fn SpanningTree_TwoConnectedFinishStp_ElectsRootPortAndDesignatedPort() {
     s2.finish_stp();
 
     // Assert
-    assert!(s1.root_port.is_none());
+    assert!(s1.root_port().is_none());
     assert!(s1.is_root_bridge());
-    assert!(s1.root_cost == 0);
+    assert!(s1.root_cost() == 0);
     assert!(s1.designated_ports().contains(&s1_s2_port));
     assert!(s1.discarding_ports().len() == 0);
 
-    assert!(s2.root_bid == s1.bid());
-    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(s2.root_bid() == s1.bid());
+    assert!(s2.root_port() == Some(s2_s1_port));
     assert!(!s2.designated_ports().contains(&s2_s1_port));
     assert!(s2.discarding_ports().len() == 0);
 }
@@ -426,14 +426,14 @@ fn SpanningTree_BiConnectEquivalentPriorities_ElectsWithBidTiebreaker() {
     s2.finish_stp();
 
     // Assert
-    assert!(s1.root_port == Some(s1_s2_port));
-    assert!(s1.root_bid == s2.bid());
-    assert!(s1.root_cost == 1);
+    assert!(s1.root_port() == Some(s1_s2_port));
+    assert!(s1.root_bid() == s2.bid());
+    assert!(s1.root_cost() == 1);
     assert!(!s1.designated_ports().contains(&s1_s2_port));
     assert!(s1.discarding_ports().len() == 0);
 
     assert!(s2.is_root_bridge());
-    assert!(s2.root_port == None);
+    assert!(s2.root_port() == None);
     assert!(s2.designated_ports().contains(&s2_s1_port));
     assert!(s2.discarding_ports().len() == 0);
 }
@@ -454,12 +454,11 @@ fn complete_network() -> (
     (usize, usize, usize, usize, usize, usize),
 ) {
     let mut sim = CableSimulator::new();
-
     let mut s1 = Switch::from_seed(1, 1);
-    s1.set_debug_tag(1);
     let mut s2 = Switch::from_seed(33, 2);
-    s2.set_debug_tag(2);
     let mut s3 = Switch::from_seed(65, 3);
+    s1.set_debug_tag(1);
+    s2.set_debug_tag(2);
     s3.set_debug_tag(3);
 
     let mut i1 = EthernetInterface::new(mac_addr!(100));
@@ -629,19 +628,19 @@ fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts()
 
     // Assert
     assert!(s1.is_root_bridge());
-    assert!(s1.root_port.is_none());
+    assert!(s1.root_port().is_none());
     assert!(
         s1.designated_ports().contains(&s1_s2_port) && s1.designated_ports().contains(&s1_s3_port)
     );
     assert!(s1.discarding_ports().len() == 0);
 
-    assert!(s2.root_bid == s1.bid());
-    assert!(s2.root_port == Some(s2_s1_port));
+    assert!(s2.root_bid() == s1.bid());
+    assert!(s2.root_port() == Some(s2_s1_port));
     assert!(s2.designated_ports().contains(&s2_s3_port));
     assert!(s2.discarding_ports().len() == 0);
 
-    assert!(s3.root_bid == s1.bid());
-    assert!(s3.root_port == Some(s3_s1_port));
+    assert!(s3.root_bid() == s1.bid());
+    assert!(s3.root_port() == Some(s3_s1_port));
     assert!(!s3.designated_ports().contains(&s3_s2_port));
     assert!(s3.discarding_ports().contains(&s3_s2_port));
 }
@@ -732,8 +731,8 @@ fn SpanningTree_ExistingNetworkReceiveTcnBpdu_UpdateDesignatedPorts() {
     // Assert
     assert!(s3.designated_ports().contains(&s3_s4_port));
 
-    assert!(s4.root_bid == s1.bid());
-    assert!(s4.root_port == Some(s4_s3_port));
+    assert!(s4.root_bid() == s1.bid());
+    assert!(s4.root_port() == Some(s4_s3_port));
 }
 
 #[test]
@@ -774,28 +773,28 @@ fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
     s4.finish_stp();
 
     // Assert
-    assert!(s4.root_bid == s4.bid());
-    assert!(s4.root_port.is_none());
-    assert!(s4.root_cost == 0);
+    assert!(s4.root_bid() == s4.bid());
+    assert!(s4.root_port().is_none());
+    assert!(s4.root_cost() == 0);
     assert!(s4.discarding_ports().len() == 0);
     assert!(s4.designated_ports().contains(&s4_s3_port));
 
-    assert!(s3.root_bid == s4.bid());
-    assert!(s3.root_port == Some(s3_s4_port));
-    assert!(s3.root_cost == 1);
+    assert!(s3.root_bid() == s4.bid());
+    assert!(s3.root_port() == Some(s3_s4_port));
+    assert!(s3.root_cost() == 1);
     assert!(s3.discarding_ports().len() == 0);
     assert!(s3.designated_ports().contains(&s3_s1_port));
     assert!(s3.designated_ports().contains(&s3_s2_port));
 
-    assert!(s2.root_bid == s4.bid());
-    assert!(s2.root_port == Some(s2_s3_port));
-    assert!(s2.root_cost == 2);
+    assert!(s2.root_bid() == s4.bid());
+    assert!(s2.root_port() == Some(s2_s3_port));
+    assert!(s2.root_cost() == 2);
     assert!(!s2.designated_ports().contains(&s2_s1_port));
     assert!(s2.discarding_ports().contains(&s2_s1_port));
 
-    assert!(s1.root_bid == s4.bid());
-    assert!(s1.root_port == Some(s1_s3_port));
-    assert!(s1.root_cost == 2);
+    assert!(s1.root_bid() == s4.bid());
+    assert!(s1.root_port() == Some(s1_s3_port));
+    assert!(s1.root_cost() == 2);
     assert!(s1.designated_ports().contains(&s1_s2_port));
     assert!(s1.discarding_ports().len() == 0);
 }

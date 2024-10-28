@@ -127,13 +127,13 @@ impl From<u16> for EtherType {
 /// Ethernet II frame format
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet2Frame {
-    preamble: [u8; 7],
-    start_frame_delimiter: u8,
+    pub preamble: [u8; 7],
+    pub start_frame_delimiter: u8,
     pub destination_address: MacAddress,
     pub source_address: MacAddress,
     pub ether_type: EtherType,
     pub data: Vec<u8>,
-    frame_check_sequence: u32,
+    pub frame_check_sequence: u32,
 }
 
 impl Ethernet2Frame {
@@ -223,16 +223,16 @@ impl ByteSerialize for Ethernet2Frame {
 /// IEEE 802.3 Ethernet Frame
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ethernet802_3Frame {
-    preamble: [u8; 7],
-    start_frame_delimiter: u8,
+    pub preamble: [u8; 7],
+    pub start_frame_delimiter: u8,
     pub destination_address: MacAddress,
     pub source_address: MacAddress,
-    length: u16,
-    dsap: u8,
-    ssap: u8,
-    control: u8,
+    pub length: u16,
+    pub dsap: u8,
+    pub ssap: u8,
+    pub control: u8,
     pub data: Vec<u8>,
-    frame_check_sequence: u32,
+    pub frame_check_sequence: u32,
 }
 
 impl Ethernet802_3Frame {

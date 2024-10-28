@@ -8,18 +8,18 @@ pub type Ipv4Address = [u8; 4];
 /// A network layer frame for IPv4 communication
 #[derive(Debug, PartialEq)]
 pub struct Ipv4Frame {
-    version_hlen: u8,  // 4 bits version, 4 bits header length
-    tos: u8,           // Type of service
-    total_length: u16, // Total length of the frame
-    id: u16,
-    flags_fragment_offset: u16, // 3 bits flags, 13 bits fragment offset
-    ttl: u8,                    // Time to live
-    protocol: u8,
-    checksum: u16,
-    source: Ipv4Address,
-    destination: Ipv4Address,
-    option: Vec<u8>,
-    data: Vec<u8>,
+    pub version_hlen: u8,  // 4 bits version, 4 bits header length
+    pub tos: u8,           // Type of service
+    pub total_length: u16, // Total length of the frame
+    pub id: u16,
+    pub flags_fragment_offset: u16, // 3 bits flags, 13 bits fragment offset
+    pub ttl: u8,                    // Time to live
+    pub protocol: u8,
+    pub checksum: u16,
+    pub source: Ipv4Address,
+    pub destination: Ipv4Address,
+    pub option: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl Ipv4Frame {
@@ -124,10 +124,10 @@ impl From<u16> for ArpOperation {
 
 /// Address Resolution Protocol (ARP)
 pub struct ArpFrame {
-    hardware_type: u16,
-    protocol_type: u16,
-    hardware_size: u8,
-    protocol_size: u8,
+    pub hardware_type: u16,
+    pub protocol_type: u16,
+    pub hardware_size: u8,
+    pub protocol_size: u8,
     pub opcode: ArpOperation,
     pub sender_mac: MacAddress,
     pub sender_ip: Ipv4Address,

@@ -40,12 +40,12 @@ pub struct Switch {
     ports: [RefCell<StpPort>; 32],     // 32 physical ports
     table: HashMap<MacAddress, usize>, // maps an address to the interface it's connected to.
 
-    pub mac_address: MacAddress,
-    pub bridge_priority: u16, // The priority of the switch in the spanning tree protocol. Lowest priority is the root bridge.
+    mac_address: MacAddress,
+    bridge_priority: u16, // The priority of the switch in the spanning tree protocol. Lowest priority is the root bridge.
 
-    pub root_bid: u64,  // Root Bridge ID = Root MAC Address + Root Priority
-    pub root_cost: u32, // The cost of the path to the root bridge ; 0 for the root bridge
-    pub root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
+    root_bid: u64,            // Root Bridge ID = Root MAC Address + Root Priority
+    root_cost: u32,           // The cost of the path to the root bridge ; 0 for the root bridge
+    root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
 
     debug_tag: u8,
 }
@@ -93,7 +93,7 @@ impl Switch {
             .connect(interface);
     }
 
-    /// Connects two switches ports together via EthernetPorts (bi-directional).
+    /// Shorthand for connecting two switches ports together via EthernetPorts (bi-directional).
     /// * `port_id` - The port on this switch to connect.
     /// * `other_switch` - The other switch to connect to.
     /// * `other_port_id` - The port on the other switch to connect to.
@@ -103,16 +103,16 @@ impl Switch {
         other_switch: &mut Switch,
         other_port_id: usize,
     ) {
-        self.ports[port_id]
-            .borrow_mut()
-            .interface
-            .connect(&other_switch.ports[other_port_id].borrow_mut().interface);
+        self.connect(
+            port_id,
+            &mut other_switch.ports[other_port_id].borrow_mut().interface,
+        );
     }
 
     /// Forwards incoming frames to the correct interface based on the destination MAC address.
     /// If the destination MAC address is not in the table, the frame is flooded to all interfaces.
     ///
-    /// If the switch receives a BPDU frame, it will update its STP state and forward the BPDU to the correct interface.
+    /// On a BPDU frame, it will update its port roles and states, and flood it's own BPDU if necessary.
     pub fn forward(&mut self) {
         let mut valid_frames: Vec<(usize, EthernetFrame)> = vec![];
 
@@ -137,6 +137,8 @@ impl Switch {
             }
         }
 
+        // TODO: Rusts borrowing is making this difficult to abstract as I have unless there is this second loop.
+        // Although a technical inefficiency, the code is significantly more readable with _receive_ethernet2 and _receive_bpdu separated.
         for (port, frame) in valid_frames {
             match frame {
                 EthernetFrame::Ethernet2(f) => self._receive_ethernet2(f, port),
@@ -189,6 +191,32 @@ impl Switch {
             .collect()
     }
 
+    /// Returns the MAC address of the switch.
+    pub fn mac_address(&self) -> MacAddress {
+        self.mac_address
+    }
+
+    /// Returns the bridge priority of the switch.
+    pub fn bridge_priority(&self) -> u16 {
+        self.bridge_priority
+    }
+
+    /// Returns the root bridge ID of the switch.
+    pub fn root_bid(&self) -> u64 {
+        self.root_bid
+    }
+
+    /// Returns the root cost of the switch.
+    pub fn root_cost(&self) -> u32 {
+        self.root_cost
+    }
+
+    /// Returns the root port of the switch.
+    pub fn root_port(&self) -> Option<usize> {
+        self.root_port
+    }
+
+    /// A tag that will appear in the debugger to help identify the switch.
     #[cfg(test)]
     pub(crate) fn set_debug_tag(&mut self, tag: u8) {
         self.debug_tag = tag;
@@ -503,20 +531,20 @@ macro_rules! bridge_id {
 
 #[derive(Debug, PartialEq)]
 pub struct BpduFrame {
-    destination_address: MacAddress,
-    source_address: MacAddress,
-    protocol_id: u16, // 0x0000 for STP, 0x0000 for RSTP
-    version: u8,      // 0x00 for STP, 0x02 for RSTP. Always 0x02 in this implementation.
-    bpdu_type: u8,    // 0x00 for Configuration BPDU, 0x02 for TCN BPDU
-    flags: u8,
-    root_bid: u64,  // Bridge ID = Root MAC Address + Root Priority
-    root_cost: u32, // The cost of the path to the root bridge
-    bid: u64,       // Bridge ID = Bridge MAC Address + Bridge Priority
-    port: u16,      // Port ID = Port Priority + Port Number
-    message_age: u16,
-    max_age: u16,
-    hello_time: u16,
-    forward_delay: u16,
+    pub destination_address: MacAddress,
+    pub source_address: MacAddress,
+    pub protocol_id: u16, // 0x0000 for STP, 0x0000 for RSTP
+    pub version: u8,      // 0x00 for STP, 0x02 for RSTP. Always 0x02 in this implementation.
+    pub bpdu_type: u8,    // 0x00 for Configuration BPDU, 0x02 for TCN BPDU
+    pub flags: u8,
+    pub root_bid: u64,  // Bridge ID = Root MAC Address + Root Priority
+    pub root_cost: u32, // The cost of the path to the root bridge
+    pub bid: u64,       // Bridge ID = Bridge MAC Address + Bridge Priority
+    pub port: u16,      // Port ID = Port Priority + Port Number
+    pub message_age: u16,
+    pub max_age: u16,
+    pub hello_time: u16,
+    pub forward_delay: u16,
 }
 
 impl BpduFrame {
