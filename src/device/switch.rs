@@ -256,7 +256,7 @@ impl Switch {
     /// * `None` if the two BIDs are equal.
     /// * `Some(true)` if bid1 is better than bid2.
     /// * `Some(false)` if bid2 is better than bid1.
-    fn compare_bids(bid1: u64, bid2: u64) -> Option<bool> {
+    pub fn compare_bids(bid1: u64, bid2: u64) -> Option<bool> {
         if bid1 == bid2 {
             return None;
         }
@@ -279,7 +279,7 @@ impl Switch {
     /// * `tcn` - Topology Change Notification. Set to true if the BPDU is a TCN BPDU, ie a BPDU that indicates a topology change.
     /// * `proposal` - Set to true if the BPDU is a proposal BPDU.
     /// * `flood_to_all` - Set to true if the BPDU should be flooded to all interfaces.
-    fn send_bpdus(&self, tcn: bool, proposal: bool, flood_to_all: bool) {
+    fn _send_bpdus(&self, tcn: bool, proposal: bool, flood_to_all: bool) {
         let mut bpdu = BpduFrame::hello(
             self.mac_address,
             self.root_bid,
@@ -321,7 +321,7 @@ impl Switch {
         for stp_port in self.ports.iter() {
             stp_port.borrow_mut().stp_state = StpPortState::Discarding;
         }
-        self.send_bpdus(true, true, true);
+        self._send_bpdus(true, true, true);
     }
 
     /// Opens all ports that haven't acted in the STP process to the Forwarding state.
@@ -392,7 +392,7 @@ impl Switch {
                 sp.root_cost = 0;
             }
 
-            self.send_bpdus(true, true, true);
+            self._send_bpdus(true, true, true);
             return;
         }
 
@@ -402,94 +402,90 @@ impl Switch {
 
     fn _receive_bpdu(&mut self, bpdu: BpduFrame, port_id: usize) {
         let prev_root_bid = self.root_bid;
-        self.ports[port_id].borrow_mut().bid = Some(bpdu.bid);
-
-        let cmpr_root_bids = Switch::compare_bids(self.root_bid, bpdu.root_bid);
-
-        // Incoming BPDUs root is worse, send an outgoing hello BPDU
-        if cmpr_root_bids == Some(true) {
-            let bpdu = BpduFrame::hello(
-                self.mac_address,
-                self.root_bid,
-                self.root_cost,
-                self.bid(),
-                port_id,
-            );
-            self.ports[port_id]
-                .borrow_mut()
-                .interface
-                .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
-
-            // On the root bridge, all ports are designated forwarding ports
-            if self.is_root_bridge() {
-                let mut sp = self.ports[port_id].borrow_mut();
-                sp.stp_role = Some(StpPortRole::Designated);
-                sp.stp_state = StpPortState::Forwarding;
-                sp.root_cost = 0;
-            }
-
-            return;
-        }
-
-        // Equivalent root bridges
-        if cmpr_root_bids.is_none() {
+        {
             let mut sp = self.ports[port_id].borrow_mut();
+            sp.bid = Some(bpdu.bid);
 
-            // On the root bridge, all ports are designated forwarding ports
-            if self.is_root_bridge() {
-                sp.stp_role = Some(StpPortRole::Designated);
-                sp.stp_state = StpPortState::Forwarding;
-                sp.root_cost = 0;
-                return;
+            let cmpr_root_bids = Switch::compare_bids(self.root_bid, bpdu.root_bid);
+
+            // Incoming BPDUs root is worse, send an outgoing hello BPDU
+            if cmpr_root_bids == Some(true) {
+                let bpdu = BpduFrame::hello(
+                    self.mac_address,
+                    self.root_bid,
+                    self.root_cost,
+                    self.bid(),
+                    port_id,
+                );
+                sp.interface
+                    .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
+
+                // On the root bridge, all ports are designated forwarding ports
+                if self.is_root_bridge() {
+                    sp.stp_role = Some(StpPortRole::Designated);
+                    sp.stp_state = StpPortState::Forwarding;
+                    sp.root_cost = 0;
+                }
+
+                return; // No need to recalculate roles if the root bridge is worse (assume everything is wrong on the other side)
             }
 
-            // Roots are equivalent, but who has the best root cost?
-            let cmpr_bids = Switch::compare_bids(bpdu.bid, self.bid());
-            if bpdu.root_cost + 1 < self.root_cost {
+            // Equivalent root bridges
+            if cmpr_root_bids.is_none() {
+                if self.is_root_bridge() {
+                    sp.stp_role = Some(StpPortRole::Designated);
+                    sp.stp_state = StpPortState::Forwarding;
+                    sp.root_cost = 0;
+                    return; // Roles are always designated forwarding, no further calculations needed
+                }
+
+                // Roots are equivalent, but who has the best root cost?
+                let cmpr_bids = Switch::compare_bids(bpdu.bid, self.bid());
+                if bpdu.root_cost + 1 < self.root_cost {
+                    sp.stp_role = Some(StpPortRole::Root);
+                    sp.stp_state = StpPortState::Forwarding;
+                    self.root_cost = bpdu.root_cost + 1;
+                    self.root_port = Some(port_id);
+                }
+                // Tiebreaker: Root costs are the same, the switch with the lower BID wins.
+                else if bpdu.root_cost + 1 == self.root_cost && cmpr_bids == Some(true) {
+                    sp.stp_role = Some(StpPortRole::Root);
+                    sp.stp_state = StpPortState::Forwarding;
+                    self.root_port = Some(port_id);
+                }
+                // Cost is worse, but should this be a backup port?
+                else if sp.stp_role != Some(StpPortRole::Root) {
+                    sp.root_cost = bpdu.root_cost + 1;
+
+                    // Redundancy: designated to designated
+                    if bpdu.is_designated()
+                        && cmpr_bids.is_some_and(|bpdu_is_better| bpdu_is_better)
+                    {
+                        sp.stp_role = Some(StpPortRole::Backup);
+                        sp.stp_state = StpPortState::Discarding;
+                    }
+                }
+            }
+            // Incoming BPDUs root is better
+            else if cmpr_root_bids.is_some_and(|better| !better) {
                 sp.stp_role = Some(StpPortRole::Root);
                 sp.stp_state = StpPortState::Forwarding;
+                self.root_bid = bpdu.root_bid; // Root changed
                 self.root_cost = bpdu.root_cost + 1;
                 self.root_port = Some(port_id);
             }
-            // Tiebreaker: If the root costs are the same, the switch with the lower BID wins.
-            else if bpdu.root_cost + 1 == self.root_cost && cmpr_bids == Some(true) {
-                sp.stp_role = Some(StpPortRole::Root);
-                sp.stp_state = StpPortState::Forwarding;
-                self.root_port = Some(port_id);
-            }
-            // Cost is worse, but should this be a backup port?
-            else if sp.stp_role != Some(StpPortRole::Root) {
-                sp.root_cost = bpdu.root_cost + 1;
-
-                // Redundancy: designated to designated
-                if bpdu.is_designated() && cmpr_bids.is_some_and(|bpdu_is_better| bpdu_is_better) {
-                    sp.stp_role = Some(StpPortRole::Backup);
-                    sp.stp_state = StpPortState::Discarding;
-                }
-            }
         }
 
-        // Incoming BPDUs root is better
-        if cmpr_root_bids.is_some_and(|better| !better) {
-            // Change the root bridge
-            let mut sp = self.ports[port_id].borrow_mut();
-            sp.stp_role = Some(StpPortRole::Root);
-            sp.stp_state = StpPortState::Forwarding;
-            self.root_bid = bpdu.root_bid;
-            self.root_cost = bpdu.root_cost + 1;
-            self.root_port = Some(port_id);
-        }
+        let root_changed = self.root_bid != prev_root_bid;
+        self._calculate_port_roles(root_changed);
 
-        // Recalculate the roles of all ports
-        self._calculate_port_roles(self.root_bid() != prev_root_bid);
-
-        // Flood the new BPDU to all interfaces
-        if prev_root_bid != self.root_bid {
-            self.send_bpdus(true, true, true);
+        if root_changed {
+            self._send_bpdus(true, true, true); // Flood the new BPDU to all interfaces
         }
     }
 
     fn _calculate_port_roles(&mut self, root_changed: bool) {
+        // Determine the minimum cost path to the root bridge for each network segment
         let mut network_segment_to_port: HashMap<u64, usize> = HashMap::new();
         for stp_port in self.ports.iter() {
             let mut sp = stp_port.borrow_mut();
@@ -521,45 +517,31 @@ impl Switch {
                 if is_min {
                     network_segment_to_port.insert(bid, sp.id);
                 }
-            } else {
-                network_segment_to_port.insert(sp.bid.unwrap(), sp.id);
+
+                continue;
             }
+
+            network_segment_to_port.insert(sp.bid.unwrap(), sp.id);
         }
 
-        // Assign roles to each port
         for stp_port in self.ports.iter() {
             let mut sp = stp_port.borrow_mut();
 
-            if sp.id == self.root_port.unwrap() {
-                continue; // Root port has already been assigned
-            }
-
-            if sp.bid.is_none() {
-                continue; // Port is not connected to a switch, no recalculation needed
+            if sp.id == self.root_port.unwrap() || sp.bid.is_none() {
+                continue; // Root is already assigned, or the port doesn't participate in STP
             }
 
             let bid = sp.bid.unwrap();
-
             if bid == self.root_bid {
                 sp.stp_role = Some(StpPortRole::Alternate);
                 sp.stp_state = StpPortState::Discarding;
-                continue;
-            }
-
-            if !network_segment_to_port.contains_key(&bid) {
+            } else if !network_segment_to_port.contains_key(&bid) {
                 sp.stp_role = Some(StpPortRole::Backup);
                 sp.stp_state = StpPortState::Discarding;
-                continue;
+            } else if !sp.stp_role.is_some_and(|r| r == StpPortRole::Backup) || root_changed {
+                sp.stp_role = Some(StpPortRole::Designated);
+                sp.stp_state = StpPortState::Forwarding;
             }
-
-            // Don't change redundant backup ports if the root bridge hasn't changed
-            let port_role = sp.stp_role;
-            if port_role.is_some_and(|r| r == StpPortRole::Backup) && !root_changed {
-                continue;
-            }
-
-            sp.stp_role = Some(StpPortRole::Designated);
-            sp.stp_state = StpPortState::Forwarding;
         }
     }
 }
