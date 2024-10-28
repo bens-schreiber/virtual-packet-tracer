@@ -783,19 +783,19 @@ fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
     assert!(s3.root_bid == s4.bid());
     assert!(s3.root_port == Some(s3_s4_port));
     assert!(s3.root_cost == 1);
-    assert!(s3.discarding_ports().contains(&s3_s2_port));
+    assert!(s3.discarding_ports().len() == 0);
     assert!(s3.designated_ports().contains(&s3_s1_port));
+    assert!(s3.designated_ports().contains(&s3_s2_port));
 
     assert!(s2.root_bid == s4.bid());
-    assert!(s2.root_port == Some(s2_s1_port));
-    assert!(s2.root_cost == 3);
-    assert!(s2.discarding_ports().len() == 0);
-    assert!(s2.designated_ports().contains(&s2_s3_port));
+    assert!(s2.root_port == Some(s2_s3_port));
+    assert!(s2.root_cost == 2);
+    assert!(!s2.designated_ports().contains(&s2_s1_port));
+    assert!(s2.discarding_ports().contains(&s2_s1_port));
 
     assert!(s1.root_bid == s4.bid());
     assert!(s1.root_port == Some(s1_s3_port));
     assert!(s1.root_cost == 2);
-    assert!(s1.discarding_ports().len() == 0);
     assert!(s1.designated_ports().contains(&s1_s2_port));
-    assert!(s1.designated_ports().contains(&s1_s3_port));
+    assert!(s1.discarding_ports().len() == 0);
 }

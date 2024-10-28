@@ -616,7 +616,7 @@ impl BpduFrame {
     }
 
     pub fn is_designated(&self) -> bool {
-        self.flags & 0b0000_0100 == 0
+        (self.flags & 0b0000_1100) == (1 << 2)
     }
 }
 
