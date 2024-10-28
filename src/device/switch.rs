@@ -252,6 +252,7 @@ impl Switch {
         crate::bridge_id!(self.mac_address, self.bridge_priority)
     }
 
+    /// Returns true if the switch is the root bridge of the network.
     pub fn is_root_bridge(&self) -> bool {
         self.root_bid == self.bid()
     }
@@ -286,7 +287,15 @@ impl Switch {
     /// * `tcn` - Topology Change Notification. Set to true if the BPDU is a TCN BPDU, ie a BPDU that indicates a topology change.
     /// * `proposal` - Set to true if the BPDU is a proposal BPDU.
     /// * `flood_to_all` - Set to true if the BPDU should be flooded to all interfaces.
-    fn send_bpdus(&self, mut bpdu: BpduFrame, tcn: bool, proposal: bool, flood_to_all: bool) {
+    fn send_bpdus(&self, tcn: bool, proposal: bool, flood_to_all: bool) {
+        let mut bpdu = BpduFrame::hello(
+            self.mac_address,
+            self.root_bid,
+            self.root_cost,
+            self.bid(),
+            0,
+        );
+
         for stp_port in self.ports.iter() {
             if !flood_to_all && stp_port.borrow().bid.is_none() {
                 continue;
@@ -320,14 +329,7 @@ impl Switch {
         for stp_port in self.ports.iter() {
             stp_port.borrow_mut().stp_state = StpPortState::Discarding;
         }
-        let bpdu = BpduFrame::hello(
-            self.mac_address,
-            self.root_bid,
-            self.root_cost,
-            self.bid(),
-            0,
-        );
-        self.send_bpdus(bpdu, true, true, true);
+        self.send_bpdus(true, true, true);
     }
 
     /// Opens all ports that haven't acted in the STP process to the Forwarding state.
@@ -338,6 +340,72 @@ impl Switch {
                 stp_port.borrow_mut().stp_state = StpPortState::Forwarding;
             }
         }
+    }
+
+    /// Disconnects a port from the switch. Reworks the STP roles and states.
+    pub fn disconnect(&mut self, port_id: usize) {
+        if self.is_root_bridge() {
+            self.ports[port_id]
+                .borrow_mut()
+                .interface
+                .port()
+                .borrow_mut()
+                .disconnect();
+            return;
+        }
+
+        let prev_role = {
+            let mut sp = self.ports[port_id].borrow_mut();
+            let prev_role = sp.stp_role.clone();
+
+            // By default, the port will be designated and forwarding with no BID and root cost-- meaning it's an edge port.
+            sp.stp_role = Some(StpPortRole::Designated);
+            sp.stp_state = StpPortState::Forwarding;
+            sp.bid = None;
+            sp.root_cost = 0;
+            sp.interface.port().borrow_mut().disconnect();
+
+            prev_role
+        };
+
+        if prev_role == Some(StpPortRole::Root) {
+            let mut found_alternate = false;
+            for (i, stp_port) in self.ports.iter().enumerate() {
+                if stp_port.borrow().stp_role == Some(StpPortRole::Alternate) {
+                    let mut sp = stp_port.borrow_mut();
+                    sp.stp_role = Some(StpPortRole::Root);
+                    sp.stp_state = StpPortState::Forwarding;
+
+                    self.root_port = Some(i);
+                    self.root_cost = sp.root_cost;
+
+                    found_alternate = true;
+                    break;
+                }
+            }
+
+            if found_alternate {
+                self._calculate_port_roles(false);
+                return;
+            }
+
+            // No alternate, enter an election with this switch as the root bridge.
+            self.root_bid = self.bid();
+            self.root_cost = 0;
+            self.root_port = None;
+            for stp_port in self.ports.iter() {
+                let mut sp = stp_port.borrow_mut();
+                sp.stp_role = Some(StpPortRole::Designated);
+                sp.stp_state = StpPortState::Forwarding;
+                sp.root_cost = 0;
+            }
+
+            self.send_bpdus(true, true, true);
+            return;
+        }
+
+        // Any other role, just recalculate the roles
+        self._calculate_port_roles(false);
     }
 
     fn _receive_bpdu(&mut self, bpdu: BpduFrame, port_id: usize) {
@@ -420,6 +488,16 @@ impl Switch {
             self.root_port = Some(port_id);
         }
 
+        // Recalculate the roles of all ports
+        self._calculate_port_roles(self.root_bid() != prev_root_bid);
+
+        // Flood the new BPDU to all interfaces
+        if prev_root_bid != self.root_bid {
+            self.send_bpdus(true, true, true);
+        }
+    }
+
+    fn _calculate_port_roles(&mut self, root_changed: bool) {
         let mut network_segment_to_port: HashMap<u64, usize> = HashMap::new();
         for stp_port in self.ports.iter() {
             let mut sp = stp_port.borrow_mut();
@@ -435,8 +513,7 @@ impl Switch {
                 let min_cost = self.ports[*min_port_id].borrow().root_cost;
 
                 let is_min = {
-                    // If the rot bridge has not changed, and the costs are not equal, compare by cost
-                    if prev_root_bid == self.root_bid && min_cost != sp.root_cost {
+                    if !root_changed && min_cost != sp.root_cost {
                         sp.root_cost < self.ports[*min_port_id].borrow().root_cost
                     }
                     // Tiebreaker: Compare by port number if the bids are equivalent
@@ -483,28 +560,14 @@ impl Switch {
                 continue;
             }
 
-            // Check if this is a redundant port
-            // If the port is a backup and the root bridge hasn't been changed, keep the port in the backup role
+            // Don't change redundant backup ports if the root bridge hasn't changed
             let port_role = sp.stp_role.clone();
-            if port_role.is_some_and(|r| r == StpPortRole::Backup) && prev_root_bid == self.root_bid
-            {
+            if port_role.is_some_and(|r| r == StpPortRole::Backup) && !root_changed {
                 continue;
             }
 
             sp.stp_role = Some(StpPortRole::Designated);
             sp.stp_state = StpPortState::Forwarding;
-        }
-
-        // Flood the new BPDU to all interfaces
-        if prev_root_bid != self.root_bid {
-            let bpdu = BpduFrame::hello(
-                self.mac_address,
-                self.root_bid,
-                self.root_cost,
-                self.bid(),
-                port_id,
-            );
-            self.send_bpdus(bpdu, true, true, true);
         }
     }
 }

@@ -348,8 +348,6 @@ fn SpanningTree_TwoConnectedFinishStp_BpdusEnd() {
     let s2_has_outgoing2 = s2.ports()[1].borrow().has_outgoing();
 
     sim.tick();
-    s1.finish_stp();
-    s2.finish_stp();
     let s1_has_outgoing3 = s1.ports()[0].borrow().has_outgoing();
     let s2_has_outgoing3 = s2.ports()[1].borrow().has_outgoing();
 
@@ -797,4 +795,77 @@ fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
     assert!(s1.root_cost() == 2);
     assert!(s1.designated_ports().contains(&s1_s2_port));
     assert!(s1.discarding_ports().len() == 0);
+}
+
+#[test]
+fn SpanningTree_TwoSwitchesDisconnectedRootPort_ElectSelfAsRootBridge() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(35, 2);
+
+    let s1_s2_port = 0;
+    let s2_s1_port = 1;
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+
+    s1.init_stp();
+    s2.init_stp();
+    sim.tick();
+
+    s1.forward();
+    s2.forward();
+    sim.tick();
+
+    s1.forward();
+    s2.forward();
+    sim.tick();
+
+    s1.finish_stp();
+    s2.finish_stp();
+
+    // Act
+    s1.disconnect(s1_s2_port);
+    s2.disconnect(s2_s1_port); // This will be triggered by consecutive losses on the bpdu timer. Manually trigger it here.
+
+    // Assert
+    assert!(s1.is_root_bridge());
+    assert!(s1.root_port().is_none());
+    assert!(s1.designated_ports().len() == 32);
+    assert!(s1.discarding_ports().len() == 0);
+
+    assert!(s2.is_root_bridge());
+    assert!(s2.root_port().is_none());
+    assert!(s2.designated_ports().len() == 32);
+    assert!(s2.discarding_ports().len() == 0);
+}
+
+#[test]
+fn SpanningTree_CompleteNetworkDisconnectRootPort_ElectsNewRoot() {
+    // Arrange
+    let (sim, mut s1, mut s2, mut s3, _, _, (_, _, s2_s1_port, _, s3_s1_port, s3_s2_port)) =
+        stp_complete_network();
+
+    // Act
+    s2.disconnect(s2_s1_port);
+    s3.disconnect(s3_s1_port);
+
+    for _ in 0..2 {
+        sim.tick();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+    }
+
+    // Assert
+    assert!(s2.is_root_bridge());
+    assert!(s2.root_port().is_none());
+    assert!(s2.designated_ports().len() == 32);
+    assert!(s2.discarding_ports().len() == 0);
+
+    assert!(s3.root_bid() == s2.bid());
+    assert!(s3.root_port() == Some(s3_s2_port));
+    assert!(s3.discarding_ports().len() == 0);
 }

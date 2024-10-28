@@ -30,18 +30,18 @@ impl CableSimulator {
     ///
     /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
     ///
-    /// All data in this simulation is moved in a single tick, thus the simulator is synchronous.
+    /// All data in this simulation is moved in a single tick, cables are synchronous and instantaneous.
     pub fn tick(&self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
 
-            // Connection, so move the outgoing buffer to the other port's incoming buffer
+            // Connection, move the outgoing buffer to the other port's incoming buffer
             if let Some(connection) = port.connection.clone() {
                 port.consume_outgoing(&mut connection.borrow_mut());
                 continue;
             }
 
-            // No connection, so clear the outgoing buffer
+            // No connection, clear outgoing
             port.consume_outgoing(&mut EthernetPort::new());
         }
     }
@@ -75,9 +75,28 @@ impl EthernetPort {
     }
 
     /// Connects two ethernet ports together. This is a bi-directional connection.
+    /// * `port1` - The first port to connect.
+    /// * `port2` - The second port to connect.
+    ///
+    /// # Panics
+    /// Panics if either port is already connected to a different port.
     pub fn connect(port1: &Rc<RefCell<EthernetPort>>, port2: &Rc<RefCell<EthernetPort>>) {
+        if port1.borrow().connection.is_some() || port2.borrow().connection.is_some() {
+            panic!("A port already has a connection");
+        }
         port1.borrow_mut().connection = Some(port2.clone());
         port2.borrow_mut().connection = Some(port1.clone());
+    }
+
+    /// Mutually disconnects the connection between two ethernet ports.
+    //
+    // A computer can tell if a cable is connected if the electrical circuit is closed.
+    // Instead of handling the situation of dangling connections, just disconnect both ports.
+    pub fn disconnect(&mut self) {
+        if let Some(connection) = self.connection.clone() {
+            connection.borrow_mut().connection = None;
+        }
+        self.connection = None;
     }
 
     /// Appends the data to the outgoing buffer.
@@ -88,7 +107,7 @@ impl EthernetPort {
 
     /// Clears the outgoing buffer and appends it to the other's incoming buffer.
     /// * `consumable` - The port to consume the outgoing buffer.
-    pub fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {
+    fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {
         consumable.incoming_buffer.append(&mut self.outgoing_buffer);
     }
 
