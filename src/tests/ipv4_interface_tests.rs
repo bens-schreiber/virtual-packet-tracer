@@ -11,8 +11,8 @@ use crate::{eth2, eth2_data, mac_addr, mac_broadcast_addr};
 fn Send_UnknownIpV4_ReceiveArpRequest() {
     // Arrange
     let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
 
@@ -52,8 +52,8 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
 fn Send_UnknownIpV4_ReceiveArpReply() {
     // Arrange
     let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
 
@@ -93,8 +93,8 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
 fn Send_Uni_ReceivesIpv4Frame() {
     // Arrange
     let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
 
@@ -125,8 +125,8 @@ fn Send_Uni_ReceivesIpv4Frame() {
 fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
     // Arrange
     let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1]);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2]);
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
 
