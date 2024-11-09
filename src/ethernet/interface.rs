@@ -33,6 +33,11 @@ impl EthernetInterface {
         EthernetPort::connect(&self.port, &other.port);
     }
 
+    /// Mutually disconnects the EthernetInterface from its connected port.
+    pub fn disconnect(&self) {
+        self.port.borrow_mut().disconnect();
+    }
+
     /// Sends data as EthernetII from this interface to the destination MAC address.
     /// The source MAC address is assumed to be this interface's MAC address.
     /// * `destination` - The destination MAC address to send the data to.

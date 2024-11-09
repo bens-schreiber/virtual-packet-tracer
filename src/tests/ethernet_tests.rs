@@ -141,7 +141,7 @@ mod EthernetInterfaceTests {
 
         // Assert
         assert!(i1_data.is_empty());
-        assert!(i2_data.len() == 1);
+        assert_eq!(i2_data.len(), 1);
 
         assert_eq!(
             i2_data[0],
@@ -174,8 +174,8 @@ mod EthernetInterfaceTests {
         let i2_data = i2.receive();
 
         // Assert
-        assert!(i1_data.len() == 1);
-        assert!(i2_data.len() == 1);
+        assert_eq!(i1_data.len(), 1);
+        assert_eq!(i2_data.len(), 1);
 
         assert_eq!(
             i1_data[0],
@@ -217,7 +217,7 @@ mod EthernetInterfaceTests {
         let received_data = i2.receive_eth2();
 
         // Assert
-        assert!(received_data.len() == 3);
+        assert_eq!(received_data.len(), 3);
         assert_eq!(*received_data[0].data, eth2_data!(1));
         assert_eq!(*received_data[1].data, eth2_data!(2));
         assert_eq!(*received_data[2].data, eth2_data!(3));
@@ -247,8 +247,8 @@ mod EthernetInterfaceTests {
         let i2_data = i2.receive_eth2();
 
         // Assert
-        assert!(i1_data.len() == 3);
-        assert!(i2_data.len() == 3);
+        assert_eq!(i1_data.len(), 3);
+        assert_eq!(i2_data.len(), 3);
 
         assert_eq!(*i1_data[0].data, eth2_data!(4));
         assert_eq!(*i1_data[1].data, eth2_data!(5));
@@ -290,7 +290,7 @@ mod EthernetInterfaceTests {
         let i2_data = i2.receive();
 
         // Assert
-        assert!(i2_data.len() == 2);
+        assert_eq!(i2_data.len(), 2);
 
         assert!(matches!(i2_data[0], EthernetFrame::Ethernet2(_)));
         assert!(matches!(i2_data[1], EthernetFrame::Ethernet802_3(_)));

@@ -5,6 +5,7 @@ mod ipv4;
 
 mod device {
     pub mod cable;
+    pub mod router;
     pub mod switch;
 }
 
@@ -13,6 +14,7 @@ mod tests {
     pub mod cable_tests;
     pub mod ethernet_tests;
     pub mod ipv4_interface_tests;
+    pub mod router_tests;
     pub mod switch_tests;
 }
 

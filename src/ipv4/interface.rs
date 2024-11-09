@@ -4,9 +4,24 @@ use super::*;
 use crate::ethernet::interface::EthernetInterface;
 use crate::ethernet::*;
 
+/// Macro for making an arp table from a list of key-value pairs.
+#[macro_export]
+macro_rules! arp_table {
+    ($($key:expr => $value:expr),*) => {
+        {
+            let mut map = std::collections::HashMap::new();
+            $(
+                map.insert($key, $value);
+            )*
+            map
+        }
+    };
+}
+
 /// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
 ///
 /// Contains an ARP table to map IP addresses to MAC addresses.
+#[derive(Debug)]
 pub struct Ipv4Interface {
     pub ethernet: EthernetInterface,
     pub ip_address: Ipv4Address,
@@ -31,6 +46,34 @@ impl Ipv4Interface {
         }
     }
 
+    #[cfg(test)]
+    pub fn from_arp_table(
+        mac_address: MacAddress,
+        ip_address: Ipv4Address,
+        subnet_mask: Ipv4Address,
+        default_gateway: Option<Ipv4Address>,
+        arp_table: HashMap<Ipv4Address, MacAddress>,
+    ) -> Ipv4Interface {
+        Ipv4Interface {
+            ethernet: EthernetInterface::new(mac_address),
+            ip_address,
+            subnet_mask,
+            arp_table,
+            default_gateway,
+        }
+    }
+
+    /// Connects this interface to another interface.
+    /// * `other` - The other interface to connect to.
+    pub fn connect(&mut self, other: &mut Ipv4Interface) {
+        self.ethernet.connect(&mut other.ethernet);
+    }
+
+    /// Mutually disconnects this interface from the ethernet interface.
+    pub fn disconnect(&mut self) {
+        self.ethernet.disconnect();
+    }
+
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
     /// * `destination` - The destination IP address to send the data to.
     /// * `data` - Byte data to send in the frame.
@@ -48,13 +91,13 @@ impl Ipv4Interface {
     pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
         // Check if the destination is on the same subnet
         let subnets_match = {
-            let mut destination_subnet = destination.clone();
-            let mut source_subnet = self.ip_address.clone();
+            let mut dest_addr = destination.clone();
+            let mut src_addr = self.ip_address.clone();
             for i in 0..4 {
-                destination_subnet[i] = destination[i] & self.subnet_mask[i];
-                source_subnet[i] = self.ip_address[i] & self.subnet_mask[i];
+                dest_addr[i] = destination[i] & self.subnet_mask[i];
+                src_addr[i] = self.ip_address[i] & self.subnet_mask[i];
             }
-            destination_subnet == source_subnet
+            dest_addr == src_addr
         };
 
         let table_key = if subnets_match {

@@ -8,7 +8,7 @@ use crate::{
 use super::cable::*;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum StpPortRole {
+enum StpRole {
     Root,       // The port that leads to the root bridge
     Designated, // The lowest cost path to the root bridge for a network segment
     Alternate,  // The lowest cost path to the root bridge (that isn't the root port)
@@ -16,7 +16,7 @@ enum StpPortRole {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum StpPortState {
+enum StpState {
     Discarding, // No forwarded frames, receives and transmits bpdus, no learning mac addresses
     Learning,   // No forwarded frames, receives and transmits BPDUs, learning mac addresses
     Forwarding, // Forwarded frames, receives and transmits BPDUs learning mac addresses
@@ -24,10 +24,10 @@ enum StpPortState {
 
 /// An ethernet interface that participates in the Spanning Tree Protocol (STP).
 #[derive(Debug)]
-struct StpPort {
+struct SwitchPort {
     interface: EthernetInterface,
-    stp_state: StpPortState,
-    stp_role: Option<StpPortRole>, // None if the port hasn't initialized its role yet
+    stp_state: StpState,
+    stp_role: Option<StpRole>, // None if the port hasn't initialized its role yet
     id: usize,
     root_cost: u32,   // 0 for the root bridge or if the port hasn't received a BPDU
     bid: Option<u64>, // The bridge ID of the connected port. None if the port has never received a BPDU.
@@ -37,7 +37,7 @@ struct StpPort {
 ///
 /// Implements IEEE 802.1W Rapid Spanning Tree Protocol (RSTP) to prevent loops.
 pub struct Switch {
-    ports: [RefCell<StpPort>; 32],     // 32 physical ports
+    ports: [RefCell<SwitchPort>; 32],  // 32 physical ports
     table: HashMap<MacAddress, usize>, // maps an address to the interface it's connected to.
 
     mac_address: MacAddress,
@@ -55,12 +55,19 @@ impl Switch {
     /// are designated ports. The switch is assumed to be the root bridge.
     /// * `mac_seed` - The seed for the MAC addresses of the interfaces. Will take the range [mac_seed, mac_seed + 32].
     /// * `bridge_priority` - The priority of the switch in the spanning tree protocol.
+    ///
+    /// # Example
+    /// ```
+    /// let switch = Switch::from_seed(1, 1);
+    /// ```
+    /// This will create a switch with the switch's MAC address as `mac_addr!(1)` and the interfaces MAC addresses as `mac_addr!(2)` through `mac_addr!(33)`.
+    /// The switch will have a bridge priority of 1.
     pub fn from_seed(mac_seed: u8, bridge_priority: u16) -> Switch {
-        let ports: [RefCell<StpPort>; 32] = (0..32)
+        let ports: [RefCell<SwitchPort>; 32] = (0..32)
             .map(|i| {
-                RefCell::new(StpPort {
+                RefCell::new(SwitchPort {
                     interface: EthernetInterface::new(mac_addr!(mac_seed + i + 1)),
-                    stp_state: StpPortState::Forwarding,
+                    stp_state: StpState::Forwarding,
                     stp_role: None,
                     id: i.into(),
                     root_cost: 0,
@@ -79,14 +86,19 @@ impl Switch {
             root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority), // Assume the switch is the root bridge
             root_cost: 0,
             root_port: None,
-            debug_tag: 0,
+            debug_tag: mac_seed,
         }
     }
 
     /// Connects two ports together via EthernetPorts (bi-directional).
     /// * `port_id` - The id of the port on this switch to connect.
     /// * `interface` - An EthernetInterface to connect to the switch.
+    /// # Panics
+    /// Panics if the port_id is greater than 32.
     pub fn connect(&mut self, port_id: usize, interface: &mut EthernetInterface) {
+        if port_id >= 32 {
+            panic!("Port ID out of range");
+        }
         self.ports[port_id]
             .borrow_mut()
             .interface
@@ -129,7 +141,7 @@ impl Switch {
 
                 match frame {
                     EthernetFrame::Ethernet2(f) => {
-                        if state != StpPortState::Discarding {
+                        if state != StpState::Discarding {
                             self._receive_ethernet2(f, i);
                         }
                     }
@@ -162,7 +174,7 @@ impl Switch {
 
         // Destination isn't in table, flood to all interfaces (except the one it came from, and disabled ports)
         for (i, other_interface) in self.ports.iter().enumerate() {
-            if i == port || other_interface.borrow().stp_state == StpPortState::Discarding {
+            if i == port || other_interface.borrow().stp_state == StpState::Discarding {
                 continue;
             }
 
@@ -220,7 +232,7 @@ impl Switch {
         self.ports
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.borrow().stp_role == Some(StpPortRole::Designated))
+            .filter(|(_, p)| p.borrow().stp_role == Some(StpRole::Designated))
             .map(|(i, _)| i)
             .collect()
     }
@@ -231,7 +243,7 @@ impl Switch {
         self.ports
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.borrow().stp_state == StpPortState::Discarding)
+            .filter(|(_, p)| p.borrow().stp_state == StpState::Discarding)
             .map(|(i, _)| i)
             .collect()
     }
@@ -252,11 +264,12 @@ impl Switch {
     /// Compares two BIDs and returns true if bid1 is better than bid2.
     /// * `bid1` - The first bridge ID to compare.
     /// * `bid2` - The second bridge ID to compare.
+    ///
     /// ## Returns
     /// * `None` if the two BIDs are equal.
     /// * `Some(true)` if bid1 is better than bid2.
     /// * `Some(false)` if bid2 is better than bid1.
-    pub fn compare_bids(bid1: u64, bid2: u64) -> Option<bool> {
+    fn compare_bids(bid1: u64, bid2: u64) -> Option<bool> {
         if bid1 == bid2 {
             return None;
         }
@@ -294,10 +307,10 @@ impl Switch {
             }
 
             let port_role = match stp_port.borrow().stp_role {
-                Some(StpPortRole::Root) => 0,
-                Some(StpPortRole::Designated) => 1,
-                Some(StpPortRole::Alternate) => 2,
-                Some(StpPortRole::Backup) => 3,
+                Some(StpRole::Root) => 0,
+                Some(StpRole::Designated) => 1,
+                Some(StpRole::Alternate) => 2,
+                Some(StpRole::Backup) => 3,
                 None => 4,
             };
             bpdu.port = stp_port.borrow().id as u16;
@@ -305,7 +318,7 @@ impl Switch {
                 tcn,
                 proposal,
                 port_role,
-                stp_port.borrow().stp_state == StpPortState::Learning,
+                stp_port.borrow().stp_state == StpState::Learning,
                 port_role == 0 || port_role == 1,
                 false,
             );
@@ -319,7 +332,7 @@ impl Switch {
     /// Begins STP by initializing all ports to the Discarding state and flooding Hello BPDUs.
     pub fn init_stp(&mut self) {
         for stp_port in self.ports.iter() {
-            stp_port.borrow_mut().stp_state = StpPortState::Discarding;
+            stp_port.borrow_mut().stp_state = StpState::Discarding;
         }
         self._send_bpdus(true, true, true);
     }
@@ -328,14 +341,22 @@ impl Switch {
     pub fn finish_stp(&mut self) {
         for stp_port in self.ports.iter() {
             if stp_port.borrow().bid.is_none() {
-                stp_port.borrow_mut().stp_role = Some(StpPortRole::Designated);
-                stp_port.borrow_mut().stp_state = StpPortState::Forwarding;
+                stp_port.borrow_mut().stp_role = Some(StpRole::Designated);
+                stp_port.borrow_mut().stp_state = StpState::Forwarding;
             }
         }
     }
 
     /// Disconnects a port from the switch. Reworks the STP roles and states.
+    /// * `port_id` - The id of the port to disconnect.
+    ///
+    /// # Panics
+    /// Panics if the port_id is greater than 32.
     pub fn disconnect(&mut self, port_id: usize) {
+        if port_id >= 32 {
+            panic!("Port ID out of range");
+        }
+
         if self.is_root_bridge() {
             self.ports[port_id]
                 .borrow_mut()
@@ -351,8 +372,8 @@ impl Switch {
             let prev_role = sp.stp_role;
 
             // By default, the port will be designated and forwarding with no BID and root cost-- meaning it's an edge port.
-            sp.stp_role = Some(StpPortRole::Designated);
-            sp.stp_state = StpPortState::Forwarding;
+            sp.stp_role = Some(StpRole::Designated);
+            sp.stp_state = StpState::Forwarding;
             sp.bid = None;
             sp.root_cost = 0;
             sp.interface.port().borrow_mut().disconnect();
@@ -360,13 +381,13 @@ impl Switch {
             prev_role
         };
 
-        if prev_role == Some(StpPortRole::Root) {
+        if prev_role == Some(StpRole::Root) {
             let mut found_alternate = false;
             for (i, stp_port) in self.ports.iter().enumerate() {
-                if stp_port.borrow().stp_role == Some(StpPortRole::Alternate) {
+                if stp_port.borrow().stp_role == Some(StpRole::Alternate) {
                     let mut sp = stp_port.borrow_mut();
-                    sp.stp_role = Some(StpPortRole::Root);
-                    sp.stp_state = StpPortState::Forwarding;
+                    sp.stp_role = Some(StpRole::Root);
+                    sp.stp_state = StpState::Forwarding;
 
                     self.root_port = Some(i);
                     self.root_cost = sp.root_cost;
@@ -387,8 +408,8 @@ impl Switch {
             self.root_port = None;
             for stp_port in self.ports.iter() {
                 let mut sp = stp_port.borrow_mut();
-                sp.stp_role = Some(StpPortRole::Designated);
-                sp.stp_state = StpPortState::Forwarding;
+                sp.stp_role = Some(StpRole::Designated);
+                sp.stp_state = StpState::Forwarding;
                 sp.root_cost = 0;
             }
 
@@ -422,8 +443,8 @@ impl Switch {
 
                 // On the root bridge, all ports are designated forwarding ports
                 if self.is_root_bridge() {
-                    sp.stp_role = Some(StpPortRole::Designated);
-                    sp.stp_state = StpPortState::Forwarding;
+                    sp.stp_role = Some(StpRole::Designated);
+                    sp.stp_state = StpState::Forwarding;
                     sp.root_cost = 0;
                 }
 
@@ -433,8 +454,8 @@ impl Switch {
             // Equivalent root bridges
             if cmpr_root_bids.is_none() {
                 if self.is_root_bridge() {
-                    sp.stp_role = Some(StpPortRole::Designated);
-                    sp.stp_state = StpPortState::Forwarding;
+                    sp.stp_role = Some(StpRole::Designated);
+                    sp.stp_state = StpState::Forwarding;
                     sp.root_cost = 0;
                     return; // Roles are always designated forwarding, no further calculations needed
                 }
@@ -442,34 +463,34 @@ impl Switch {
                 // Roots are equivalent, but who has the best root cost?
                 let cmpr_bids = Switch::compare_bids(bpdu.bid, self.bid());
                 if bpdu.root_cost + 1 < self.root_cost {
-                    sp.stp_role = Some(StpPortRole::Root);
-                    sp.stp_state = StpPortState::Forwarding;
+                    sp.stp_role = Some(StpRole::Root);
+                    sp.stp_state = StpState::Forwarding;
                     self.root_cost = bpdu.root_cost + 1;
                     self.root_port = Some(port_id);
                 }
                 // Tiebreaker: Root costs are the same, the switch with the lower BID wins.
                 else if bpdu.root_cost + 1 == self.root_cost && cmpr_bids == Some(true) {
-                    sp.stp_role = Some(StpPortRole::Root);
-                    sp.stp_state = StpPortState::Forwarding;
+                    sp.stp_role = Some(StpRole::Root);
+                    sp.stp_state = StpState::Forwarding;
                     self.root_port = Some(port_id);
                 }
                 // Cost is worse, but should this be a backup port?
-                else if sp.stp_role != Some(StpPortRole::Root) {
+                else if sp.stp_role != Some(StpRole::Root) {
                     sp.root_cost = bpdu.root_cost + 1;
 
                     // Redundancy: designated to designated
                     if bpdu.is_designated()
                         && cmpr_bids.is_some_and(|bpdu_is_better| bpdu_is_better)
                     {
-                        sp.stp_role = Some(StpPortRole::Backup);
-                        sp.stp_state = StpPortState::Discarding;
+                        sp.stp_role = Some(StpRole::Backup);
+                        sp.stp_state = StpState::Discarding;
                     }
                 }
             }
             // Incoming BPDUs root is better
             else if cmpr_root_bids.is_some_and(|better| !better) {
-                sp.stp_role = Some(StpPortRole::Root);
-                sp.stp_state = StpPortState::Forwarding;
+                sp.stp_role = Some(StpRole::Root);
+                sp.stp_state = StpState::Forwarding;
                 self.root_bid = bpdu.root_bid; // Root changed
                 self.root_cost = bpdu.root_cost + 1;
                 self.root_port = Some(port_id);
@@ -533,14 +554,14 @@ impl Switch {
 
             let bid = sp.bid.unwrap();
             if bid == self.root_bid {
-                sp.stp_role = Some(StpPortRole::Alternate);
-                sp.stp_state = StpPortState::Discarding;
+                sp.stp_role = Some(StpRole::Alternate);
+                sp.stp_state = StpState::Discarding;
             } else if !network_segment_to_port.contains_key(&bid) {
-                sp.stp_role = Some(StpPortRole::Backup);
-                sp.stp_state = StpPortState::Discarding;
-            } else if !sp.stp_role.is_some_and(|r| r == StpPortRole::Backup) || root_changed {
-                sp.stp_role = Some(StpPortRole::Designated);
-                sp.stp_state = StpPortState::Forwarding;
+                sp.stp_role = Some(StpRole::Backup);
+                sp.stp_state = StpState::Discarding;
+            } else if !sp.stp_role.is_some_and(|r| r == StpRole::Backup) || root_changed {
+                sp.stp_role = Some(StpRole::Designated);
+                sp.stp_state = StpState::Forwarding;
             }
         }
     }

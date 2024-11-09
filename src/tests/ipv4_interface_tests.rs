@@ -4,8 +4,40 @@ use crate::device::cable::CableSimulator;
 use crate::ethernet::ByteSerialize;
 use crate::ethernet::{interface::*, EtherType};
 use crate::ipv4::interface::*;
-use crate::ipv4::*;
+use crate::{arp_table, ipv4::*};
 use crate::{eth2, eth2_data, mac_addr, mac_broadcast_addr};
+
+fn same_subnet_filled_arp_tables() -> (CableSimulator, Ipv4Interface, Ipv4Interface) {
+    let mut sim = CableSimulator::new();
+
+    let i1_ip = [192, 168, 1, 1];
+    let i1_mac_addr = mac_addr!(1);
+
+    let i2_ip = [192, 168, 1, 2];
+    let i2_mac_addr = mac_addr!(2);
+
+    let mut i1 = Ipv4Interface::from_arp_table(
+        i1_mac_addr,
+        i1_ip,
+        [255, 255, 255, 0],
+        None,
+        arp_table!(i2_ip => i2_mac_addr),
+    );
+
+    let mut i2 = Ipv4Interface::from_arp_table(
+        i2_mac_addr,
+        i2_ip,
+        [255, 255, 255, 0],
+        None,
+        arp_table!(i1_ip => i1_mac_addr),
+    );
+
+    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+
+    EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
+
+    (sim, i1, i2)
+}
 
 #[test]
 fn Send_UnknownIpV4_ReceiveArpRequest() {
@@ -27,7 +59,7 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
 
     // Assert
     assert!(i1_data.is_empty());
-    assert!(i2_data.len() == 1);
+    assert_eq!(i2_data.len(), 1);
     assert!(!i1_sent);
 
     assert_eq!(
@@ -70,7 +102,7 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
     let i1_data = i1.ethernet.receive();
 
     // Assert
-    assert!(i1_data.len() == 1);
+    assert_eq!(i1_data.len(), 1);
     assert_eq!(
         i1_data[0],
         eth2!(
@@ -90,21 +122,9 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
 }
 
 #[test]
-fn Send_Uni_ReceivesIpv4Frame() {
+fn Send_UniSameSubnet_ReceivesIpv4Frame() {
     // Arrange
-    let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
-
-    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
-
-    EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
-
-    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
-    sim.tick();
-    i2.receive(); // Sends ARP reply
-    sim.tick();
-    i1.receive(); // Process ARP reply
+    let (sim, mut i1, mut i2) = same_subnet_filled_arp_tables();
 
     // Act
     let i1_sent = i1.send(i2.ip_address, eth2_data!(1)); // Sends Ipv4 frame
@@ -114,7 +134,7 @@ fn Send_Uni_ReceivesIpv4Frame() {
 
     // Assert
     assert!(i1_sent);
-    assert!(i2_data.len() == 1);
+    assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
         Ipv4Frame::new(i1.ip_address, i2.ip_address, eth2_data!(1))
@@ -122,21 +142,38 @@ fn Send_Uni_ReceivesIpv4Frame() {
 }
 
 #[test]
-fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
+fn Send_UniDifferentSubnet_SendsToDefaultGateway() {
     // Arrange
     let mut sim = CableSimulator::new();
-    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
-    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
-    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+    let mut default_gateway =
+        Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 254], [255, 255, 255, 0], None);
+    let mut i1 = Ipv4Interface::from_arp_table(
+        mac_addr!(2),
+        [192, 168, 1, 1],
+        [255, 255, 255, 0],
+        Some(default_gateway.ip_address),
+        arp_table!([192, 168, 1, 1] => mac_addr!(1)),
+    );
 
-    EthernetInterface::connect(&mut i1.ethernet, &mut i2.ethernet);
+    EthernetInterface::connect(&mut i1.ethernet, &mut default_gateway.ethernet);
 
-    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
+    sim.adds(vec![i1.ethernet.port(), default_gateway.ethernet.port()]);
+
+    // Act
+    let i1_sent = i1.send([192, 168, 2, 1], eth2_data!(1));
     sim.tick();
-    i2.receive(); // Sends ARP reply
-    sim.tick();
-    i1.receive(); // Process ARP reply
+    let dg_received = default_gateway.ethernet.receive();
+
+    // Assert
+    assert!(!i1_sent);
+    assert_eq!(dg_received.len(), 1);
+}
+
+#[test]
+fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
+    // Arrange
+    let (_, mut i1, mut i2) = same_subnet_filled_arp_tables();
 
     // Act
     let i1_sent = i1.send(i2.ip_address, eth2_data!(1)); // Sends Ipv4 frame
