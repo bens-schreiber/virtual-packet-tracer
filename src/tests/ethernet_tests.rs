@@ -260,6 +260,33 @@ mod EthernetInterfaceTests {
     }
 
     #[test]
+    fn Send_ToSelf_ReturnsData() {
+        // Arrange
+        let mut sim = CableSimulator::new();
+        let mut i1 = EthernetInterface::new(mac_addr!(1));
+
+        sim.add(i1.port());
+
+        // Act
+        i1.send(i1.mac_address, EtherType::Debug, eth2_data!(1));
+        sim.tick();
+
+        let i1_data = i1.receive();
+
+        // Assert
+        assert_eq!(i1_data.len(), 1);
+        assert_eq!(
+            i1_data[0],
+            eth2!(
+                i1.mac_address,
+                i1.mac_address,
+                eth2_data!(1),
+                EtherType::Debug
+            )
+        );
+    }
+
+    #[test]
     fn Receive_NoData_ReturnsEmptyVec() {
         // Arrange
         let mut i1 = EthernetInterface::new(mac_addr!(1));

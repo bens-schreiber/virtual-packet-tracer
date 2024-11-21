@@ -105,6 +105,13 @@ impl EthernetPort {
         self.outgoing_buffer.push(data);
     }
 
+    /// Appends the data the incoming buffer.
+    /// * `data` - The data to append to the outgoing buffer and incoming buffer.
+    pub fn send_to_self(&mut self, data: Vec<u8>) {
+        self.send(data.clone());
+        self.incoming_buffer.push(data);
+    }
+
     /// Clears the outgoing buffer and appends it to the other's incoming buffer.
     /// * `consumable` - The port to consume the outgoing buffer.
     fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {

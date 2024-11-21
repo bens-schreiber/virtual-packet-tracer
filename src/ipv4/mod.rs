@@ -5,6 +5,13 @@ pub mod interface;
 /// Internet Protocol version 4 (IPv4) address
 pub type Ipv4Address = [u8; 4];
 
+#[macro_export]
+macro_rules! localhost {
+    () => {
+        [127, 0, 0, 1]
+    };
+}
+
 /// A network layer frame for IPv4 communication
 #[derive(Debug, PartialEq)]
 pub struct Ipv4Frame {

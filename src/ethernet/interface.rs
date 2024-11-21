@@ -60,6 +60,10 @@ impl EthernetInterface {
         data: Vec<u8>,
     ) {
         let frame = Ethernet2Frame::new(destination, source, data, ether_type);
+        if destination == self.mac_address {
+            self.port.borrow_mut().send_to_self(frame.to_bytes());
+            return;
+        }
         self.port.borrow_mut().send(frame.to_bytes());
     }
 

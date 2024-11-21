@@ -221,25 +221,28 @@ fn SpanningTree_Init_DiscardsEndDevices() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
-    let mut switch = Switch::from_seed(2, 1);
+    let mut i2 = EthernetInterface::new(mac_addr!(2));
+    let mut switch = Switch::from_seed(3, 1);
 
-    let switch_port = 0;
-    switch.connect(switch_port, &mut i1);
+    let i1_s_port = 0;
+    let i2_s_port = 1;
+    switch.connect(i1_s_port, &mut i1);
+    switch.connect(i2_s_port, &mut i2);
 
-    sim.add(i1.port());
+    sim.adds(vec![i1.port(), i2.port()]);
     sim.adds(switch.ports());
 
     // Act
-    i1.send(i1.mac_address, EtherType::Debug, eth2_data!(1)); // attempt to send data to self
+    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     switch.init_stp();
     sim.tick();
     switch.forward();
     sim.tick();
 
-    let i1_data = i1.receive_eth2();
+    let i2_data = i2.receive_eth2();
 
     // Assert
-    assert!(i1_data.is_empty());
+    assert!(i2_data.is_empty());
 }
 
 #[test]
@@ -295,12 +298,15 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
-    let mut switch = Switch::from_seed(2, 1);
+    let mut i2 = EthernetInterface::new(mac_addr!(2));
+    let mut switch = Switch::from_seed(3, 1);
 
-    let switch_port = 0;
-    switch.connect(switch_port, &mut i1);
+    let i1_s_port = 0;
+    let i2_s_port = 1;
+    switch.connect(i1_s_port, &mut i1);
+    switch.connect(i2_s_port, &mut i2);
 
-    sim.add(i1.port());
+    sim.adds(vec![i1.port(), i2.port()]);
     sim.adds(switch.ports());
 
     // Act
@@ -308,17 +314,17 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
     sim.tick();
 
     switch.forward();
-    i1.send(i1.mac_address, EtherType::Debug, eth2_data!(1)); // attempt to send data to self
+    i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     switch.finish_stp();
 
     sim.tick();
     switch.forward();
     sim.tick();
 
-    let i1_data = i1.receive_eth2();
+    let i2_data = i2.receive_eth2();
 
     // Assert
-    assert_eq!(i1_data.len(), 1);
+    assert_eq!(i2_data.len(), 1);
 }
 
 #[test]
