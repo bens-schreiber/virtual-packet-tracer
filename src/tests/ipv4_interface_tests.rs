@@ -160,7 +160,7 @@ fn Send_UniSameSubnet_ReceivesIpv4Frame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, eth2_data!(1))
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1))
     );
 }
 
@@ -195,7 +195,7 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, eth2_data!(1))
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1))
     );
 }
 

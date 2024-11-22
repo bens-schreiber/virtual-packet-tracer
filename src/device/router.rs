@@ -154,9 +154,14 @@ impl Router {
 
                 if let Some(route) = route {
                     let d_rp = &mut *self.ports[route.port].borrow_mut();
-                    d_rp.interface
-                        .borrow_mut()
-                        .sendv(frame.source, frame.destination, frame.data); // Send without modifying the source IP, just the MAC
+
+                    // Send without modifying the source IP, just the MAC
+                    d_rp.interface.borrow_mut().sendv(
+                        frame.source,
+                        frame.destination,
+                        frame.ttl - 1,
+                        frame.data,
+                    );
                 }
 
                 // TODO: ELSE: ICMP Destination Unreachable, maybe a default route?

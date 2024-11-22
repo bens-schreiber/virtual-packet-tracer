@@ -30,14 +30,14 @@ pub struct Ipv4Frame {
 }
 
 impl Ipv4Frame {
-    pub fn new(source: Ipv4Address, destination: Ipv4Address, data: Vec<u8>) -> Ipv4Frame {
+    pub fn new(source: Ipv4Address, destination: Ipv4Address, ttl: u8, data: Vec<u8>) -> Ipv4Frame {
         Ipv4Frame {
             version_hlen: 0x45, // Ipv4, 5 words
             tos: 0,
             total_length: 20 + data.len() as u16,
             id: 0,
             flags_fragment_offset: 0,
-            ttl: 64, // Default TTL
+            ttl,
             protocol: 0,
             checksum: 0, // TODO: Calculate checksum
             source,

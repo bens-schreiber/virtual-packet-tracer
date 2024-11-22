@@ -72,7 +72,7 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     assert_eq!(r_p0_receive.len(), 1);
     assert_eq!(
         r_p0_receive[0],
-        Ipv4Frame::new(i1.ip_address, i1.default_gateway.unwrap(), data.clone())
+        Ipv4Frame::new(i1.ip_address, i1.default_gateway.unwrap(), 64, data.clone())
     );
 }
 
@@ -130,6 +130,6 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, data.clone())
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 63, data.clone())
     );
 }

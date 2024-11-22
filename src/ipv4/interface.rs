@@ -114,9 +114,10 @@ impl Ipv4Interface {
     }
 
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
-    /// * `destination` - The destination IP address to send the data to.
-    /// * `data` - Byte data to send in the frame.
     /// * `source` - The source IP address to send the data from.
+    /// * `destination` - The destination IP address to send the data to.
+    /// * `ttl` - Time to live of the frame.
+    /// * `data` - Byte data to send in the frame.
     ///
     /// # Remarks
     /// Will send an ARP request if the destination MAC address is not in the ARP table.
@@ -128,7 +129,13 @@ impl Ipv4Interface {
     ///
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false otherwise.
-    pub fn sendv(&mut self, source: Ipv4Address, destination: Ipv4Address, data: Vec<u8>) -> bool {
+    pub fn sendv(
+        &mut self,
+        source: Ipv4Address,
+        destination: Ipv4Address,
+        ttl: u8,
+        data: Vec<u8>,
+    ) -> bool {
         // Check if the destination is on the same subnet
         let subnets_match = destination == localhost!()
             || (network_address!(destination, self.subnet_mask)
@@ -143,7 +150,7 @@ impl Ipv4Interface {
             self.default_gateway.unwrap()
         };
 
-        let frame = Ipv4Frame::new(source, destination, data);
+        let frame = Ipv4Frame::new(source, destination, ttl, data);
         if let Some(mac_address) = self.arp_table.get(&frame.destination) {
             self.ethernet
                 .send(*mac_address, EtherType::Ipv4, frame.to_bytes());
@@ -160,6 +167,7 @@ impl Ipv4Interface {
     }
 
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
+    /// Defaults to a Ipv4 TTL of 64.
     /// * `destination` - The destination IP address to send the data to.
     /// * `data` - Byte data to send in the frame.
     ///
@@ -174,7 +182,7 @@ impl Ipv4Interface {
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false otherwise.
     pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
-        self.sendv(self.ip_address, destination, data)
+        self.sendv(self.ip_address, destination, 64, data)
     }
 
     /// Receives data from the ethernet interface. Processes ARP frames to the ARP table.
