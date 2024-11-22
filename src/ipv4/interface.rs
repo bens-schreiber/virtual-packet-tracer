@@ -221,14 +221,21 @@ impl Ipv4Interface {
                 if arp_frame.opcode == ArpOperation::Reply {
                     self.arp_table
                         .insert(arp_frame.sender_ip, arp_frame.sender_mac);
+                    continue;
                 }
-                // Send an ARP reply if we are the target
-                else if arp_frame.target_ip == self.ip_address {
-                    self.ethernet.arp_reply(
-                        self.ip_address,
-                        arp_frame.sender_mac,
-                        arp_frame.sender_ip,
-                    );
+
+                let destination_mac: Option<MacAddress> = {
+                    if arp_frame.target_ip == self.ip_address {
+                        Some(arp_frame.sender_mac)
+                    } else {
+                        self.arp_table.get(&arp_frame.target_ip).copied()
+                    }
+                };
+
+                // Reply if this interface has the value
+                if let Some(destination_mac) = destination_mac {
+                    self.ethernet
+                        .arp_reply(self.ip_address, destination_mac, arp_frame.sender_ip);
                 }
             }
         }

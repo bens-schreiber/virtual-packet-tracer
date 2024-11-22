@@ -112,7 +112,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     r.route();
     sim.tick();
 
-    i1.receive();
+    i1.receive(); // ---- i1 -> r send frame
     sim.tick();
 
     r.route(); // ---- r -> i2 Resolve mac addresses
@@ -121,7 +121,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     i2.receive();
     sim.tick();
 
-    r.route(); // ---- i2 -> r Resolve mac addresses
+    r.route(); // ---- r -> i2 send frame
     sim.tick();
 
     let i2_data = i2.receive();

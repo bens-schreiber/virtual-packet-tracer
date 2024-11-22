@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 /// Simulates the movement of data.
 ///
-/// Holds a collection of EthernetPorts and moves data between them in a synchronous manner.
+/// Holds a collection of EthernetPorts and moves data between on each `tick`.
 pub struct CableSimulator {
     ports: Vec<Rc<RefCell<EthernetPort>>>,
 }
