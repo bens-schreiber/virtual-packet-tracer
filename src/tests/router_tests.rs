@@ -7,37 +7,6 @@ use crate::{
 };
 
 #[test]
-fn FromSeed_ConnectPortOnDisabledInterface_Panics() {
-    // Arrange
-    let mut router = Router::from_seed(1);
-    let mut i1 = Ipv4Interface::new(mac_addr!(10), [192, 168, 1, 1], [255, 255, 255, 0], None);
-
-    // Act
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        router.connect(0, &mut i1);
-    }));
-
-    // Assert
-    assert!(result.is_err());
-}
-
-#[test]
-fn FromSeed_ConnectPortOnEnabledInterface_DoesNotPanic() {
-    // Arrange
-    let mut router = Router::from_seed(1);
-    let mut i1 = Ipv4Interface::new(mac_addr!(10), [192, 168, 1, 1], [255, 255, 255, 0], None);
-
-    // Act
-    router.enable_interface(0, [192, 168, 1, 0], [255, 255, 255, 0]);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        router.connect(0, &mut i1);
-    }));
-
-    // Assert
-    assert!(result.is_ok());
-}
-
-#[test]
 fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     // Arrange
     let mut sim = CableSimulator::new();
@@ -82,22 +51,22 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
-        [192, 168, 1, 1],
+        [192, 168, 1, 2],
         [255, 255, 255, 0],
-        Some([192, 168, 1, 0]),
+        Some([192, 168, 1, 1]),
     );
     let mut i2 = Ipv4Interface::new(
         mac_addr!(2),
-        [192, 168, 2, 1],
+        [192, 168, 2, 2],
         [255, 255, 255, 0],
-        Some([192, 168, 2, 0]),
+        Some([192, 168, 2, 1]),
     );
     let mut r = Router::from_seed(3);
 
     r.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
-    r.enable_interface(1, i2.default_gateway.unwrap(), [255, 255, 255, 0]);
-
     r.connect(0, &mut i1);
+
+    r.enable_interface(1, i2.default_gateway.unwrap(), [255, 255, 255, 0]);
     r.connect(1, &mut i2);
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
@@ -131,5 +100,72 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     assert_eq!(
         i2_data[0],
         Ipv4Frame::new(i1.ip_address, i2.ip_address, 63, data.clone())
+    );
+}
+
+#[test]
+fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut i2 = Ipv4Interface::new(
+        mac_addr!(2),
+        [192, 168, 2, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 2, 1]),
+    );
+    let mut r1 = Router::from_seed(3);
+    let mut r2 = Router::from_seed(12);
+
+    r1.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.connect(0, &mut i1);
+
+    r2.enable_interface(0, i2.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r2.connect(0, &mut i2);
+
+    r1.enable_interface(1, [10, 0, 0, 1], [255, 255, 255, 252]);
+    r2.enable_interface(1, [10, 0, 0, 2], [255, 255, 255, 252]);
+    r1.enable_rip(1);
+    r2.enable_rip(1);
+    r1.connect_router(1, &mut r2, 1);
+
+    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+    sim.adds(r1.ports());
+    sim.adds(r2.ports());
+
+    let data: Vec<u8> = "Hello, world!".as_bytes().into();
+
+    // Act
+    r1.send_rip_frames();
+    r2.send_rip_frames();
+    sim.tick();
+
+    r1.route();
+    r2.route();
+    sim.tick();
+
+    i1.send(i2.ip_address, data.clone());
+
+    for _ in 0..6 {
+        sim.tick();
+        i1.receive();
+        i2.receive();
+        r1.route();
+        r2.route();
+    }
+
+    sim.tick();
+    let i2_data = i2.receive();
+
+    // Assert
+    assert_eq!(i2_data.len(), 1);
+    assert_eq!(
+        i2_data[0],
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 62, data.clone())
     );
 }

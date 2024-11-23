@@ -12,6 +12,20 @@ macro_rules! localhost {
     };
 }
 
+/// 224.0.0.0 -> 239.255.255.255 or 255.255.255.255
+#[macro_export]
+macro_rules! is_ipv4_multicast_or_broadcast {
+    ($address:expr) => {{
+        if $address.len() != 4 {
+            false
+        } else if (224..=239).contains(&($address[0])) {
+            true
+        } else {
+            $address == [255, 255, 255, 255]
+        }
+    }};
+}
+
 /// A network layer frame for IPv4 communication
 #[derive(Debug, PartialEq)]
 pub struct Ipv4Frame {

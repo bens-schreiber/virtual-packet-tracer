@@ -4,6 +4,18 @@ use super::*;
 use crate::ethernet::interface::EthernetInterface;
 use crate::{ethernet::*, localhost};
 
+macro_rules! ipv4_multicast_addr {
+    () => {
+        [224, 0, 0, 0]
+    };
+}
+
+macro_rules! mac_multicast_addr {
+    () => {
+        [0x01, 0x00, 0x5e, 0x00, 0x00, 0x00]
+    };
+}
+
 /// Arp table from a list of key-value pairs.
 #[macro_export]
 macro_rules! arp_table {
@@ -113,9 +125,17 @@ impl Ipv4Interface {
         self.ethernet.disconnect();
     }
 
+    /// Checks if the destination IP address is on the same subnet as this interface.
+    fn _subnets_match(&self, destination: Ipv4Address) -> bool {
+        destination == localhost!()
+            || (network_address!(destination, self.subnet_mask)
+                == network_address!(self.ip_address, self.subnet_mask))
+    }
+
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
     /// * `source` - The source IP address to send the data from.
     /// * `destination` - The destination IP address to send the data to.
+    /// * `proxied_destination` - The destination that the mac address will be resolved to, if different from the destination.
     /// * `ttl` - Time to live of the frame.
     /// * `data` - Byte data to send in the frame.
     ///
@@ -127,31 +147,32 @@ impl Ipv4Interface {
     /// 1. The destination IP address if the destination is on the same subnet.
     /// 2. The default gateway if the destination is on a different subnet.
     ///
+    /// Proxy destination is used to send to a different destination than the one resolved by the ARP table.
+    /// For instance, if I have a packet to send from A to C, but the topology is A -> B -> C, I can proxy the packet to become
+    /// A->B, resolving the ARP table for B, and then sending the packet to C. This is a workaround for routers.
+    ///
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false otherwise.
     pub fn sendv(
         &mut self,
         source: Ipv4Address,
         destination: Ipv4Address,
+        proxied_destination: Option<Ipv4Address>,
         ttl: u8,
         data: Vec<u8>,
     ) -> bool {
-        // Check if the destination is on the same subnet
-        let subnets_match = destination == localhost!()
-            || (network_address!(destination, self.subnet_mask)
-                == network_address!(self.ip_address, self.subnet_mask));
-
-        let table_key = if subnets_match {
-            destination
+        let key = if self._subnets_match(destination) {
+            Some(destination)
         } else {
-            if self.default_gateway.is_none() {
-                return false;
-            }
-            self.default_gateway.unwrap()
+            proxied_destination.or(self.default_gateway)
         };
 
+        if key.is_none() {
+            return false;
+        }
+
         let frame = Ipv4Frame::new(source, destination, ttl, data);
-        if let Some(mac_address) = self.arp_table.get(&frame.destination) {
+        if let Some(mac_address) = self.arp_table.get(&key.unwrap()) {
             self.ethernet
                 .send(*mac_address, EtherType::Ipv4, frame.to_bytes());
             return true;
@@ -160,8 +181,8 @@ impl Ipv4Interface {
         // Send an ARP request to find the MAC address of the target IP address
         // Buffer the frame to send after the ARP request is resolved
         self.arp_buf
-            .push(WaitForArpResolveFrame::new(table_key, frame));
-        self.ethernet.arp_request(self.ip_address, table_key);
+            .push(WaitForArpResolveFrame::new(key.unwrap(), frame));
+        self.ethernet.arp_request(self.ip_address, key.unwrap());
 
         false
     }
@@ -182,7 +203,15 @@ impl Ipv4Interface {
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false otherwise.
     pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
-        self.sendv(self.ip_address, destination, 64, data)
+        self.sendv(self.ip_address, destination, None, 64, data)
+    }
+
+    /// Sends data to the multicast address.
+    /// * `data` - Byte data to send in the frame.
+    pub fn multicast(&mut self, data: Vec<u8>) {
+        let frame = Ipv4Frame::new(self.ip_address, ipv4_multicast_addr!(), 64, data.clone());
+        self.ethernet
+            .send(mac_multicast_addr!(), EtherType::Ipv4, frame.to_bytes());
     }
 
     /// Receives data from the ethernet interface. Processes ARP frames to the ARP table.
