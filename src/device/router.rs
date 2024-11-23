@@ -148,20 +148,22 @@ impl Router {
         }
     }
 
+    fn _create_rip_frame(&mut self) -> RipFrame {
+        let mut frame = RipFrame::new_response();
+        for (k, v) in &self.table {
+            frame.routes.push(RipRoute::new(
+                k.clone(),
+                v.subnet_mask,
+                v.next_hop,
+                v.metric,
+            ));
+        }
+        frame
+    }
+
     /// Floods all enabled ports with a RIP frame.
     pub fn send_rip_frames(&mut self) {
-        let data = {
-            let mut frame = RipFrame::new_response();
-            for (k, v) in &self.table {
-                frame.routes.push(RipRoute::new(
-                    k.clone(),
-                    v.subnet_mask,
-                    v.next_hop,
-                    v.metric,
-                ));
-            }
-            frame.to_bytes()
-        };
+        let data = self._create_rip_frame().to_bytes();
 
         for i in 0..self.ports.len() {
             let rp = &mut *self.ports[i].borrow_mut();
@@ -181,6 +183,7 @@ impl Router {
     }
 
     #[cfg(test)]
+    /// Receives the IPv4 frames from the interface on a given port instead of routing them.
     pub fn receive_port(&mut self, port: usize) -> Vec<crate::ipv4::Ipv4Frame> {
         self.ports[port]
             .borrow_mut()
@@ -188,10 +191,7 @@ impl Router {
             .borrow_mut()
             .receive()
     }
-}
 
-// ##### Router Configuration
-impl Router {
     /// Configures an interface with a ip address, subnet and network address.
     /// * `port` - The port number to enable.
     ///
@@ -223,19 +223,22 @@ impl Router {
     }
 
     /// Enables RIP on a port on the router.
+    /// Sends a RIP frame to the multicast address.
     /// * `port` - The port number to enable RIP on.
     pub fn enable_rip(&mut self, port: usize) {
         if port >= self.ports.len() {
             panic!("Port {} is out of range for the router.", port);
         }
 
-        let mut rp = self.ports[port].borrow_mut();
-        if !rp.enabled {
+        if !self.ports[port].borrow_mut().enabled {
             panic!("Port {} is disabled.", port);
         }
 
+        let frame = self._create_rip_frame();
+        let mut rp = self.ports[port].borrow_mut();
         self.rip_enabled = true;
         rp.rip_enabled = true;
+        rp.interface.borrow_mut().multicast(frame.to_bytes());
     }
 
     /// Connects an interface to the router with the given port number.

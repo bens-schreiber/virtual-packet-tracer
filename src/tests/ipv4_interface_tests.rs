@@ -145,7 +145,7 @@ fn Send_UnknownIpV4AfterMultipleRetries_ReceiveMultipleArpRequests() {
 }
 
 #[test]
-fn Send_UniSameSubnet_ReceivesIpv4Frame() {
+fn Send_SameSubnet_ReceivesIpv4Frame() {
     // Arrange
     let (sim, mut i1, mut i2) = same_subnet_filled_arp_tables();
 
@@ -200,7 +200,7 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
 }
 
 #[test]
-fn Send_UniDifferentSubnet_SendsToDefaultGateway() {
+fn Send_DifferentSubnet_SendsToDefaultGateway() {
     // Arrange
     let mut sim = CableSimulator::new();
 
@@ -214,7 +214,7 @@ fn Send_UniDifferentSubnet_SendsToDefaultGateway() {
         arp_table!([192, 168, 1, 1] => mac_addr!(1)),
     );
 
-    EthernetInterface::connect(&mut i1.ethernet, &mut default_gateway.ethernet);
+    i1.connect(&mut default_gateway);
 
     sim.adds(vec![i1.ethernet.port(), default_gateway.ethernet.port()]);
 
@@ -263,6 +263,39 @@ fn Send_FillsArpTableOnReceive_SendsWithoutArp() {
     assert!(i2_sends);
     assert_eq!(i2_data.len(), 1);
     assert_eq!(i1_data.len(), 1);
+}
+
+#[test]
+fn Send_DifferentSubnetsWithoutDefaultGateway_DropsFrame() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::from_arp_table(
+        mac_addr!(1),
+        [192, 168, 1, 1],
+        [255, 255, 255, 0],
+        None,
+        arp_table!([192,168,1,2] => mac_addr!(2)),
+    );
+    let mut i2 = Ipv4Interface::from_arp_table(
+        mac_addr!(2),
+        [192, 168, 2, 1],
+        [255, 255, 255, 0],
+        None,
+        arp_table!(i1.ip_address => i1.ethernet.mac_address),
+    );
+
+    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+    i1.connect(&mut i2);
+
+    // Act
+    let i1_sent = i1.send(i2.ip_address, eth2_data!(1));
+    sim.tick();
+
+    let i2_data = i2.receive();
+
+    // Assert
+    assert!(!i1_sent);
+    assert!(i2_data.is_empty());
 }
 
 #[test]

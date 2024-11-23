@@ -147,9 +147,10 @@ impl Ipv4Interface {
     /// 1. The destination IP address if the destination is on the same subnet.
     /// 2. The default gateway if the destination is on a different subnet.
     ///
-    /// Proxy destination is used to send to a different destination than the one resolved by the ARP table.
-    /// For instance, if I have a packet to send from A to C, but the topology is A -> B -> C, I can proxy the packet to become
-    /// A->B, resolving the ARP table for B, and then sending the packet to C. This is a workaround for routers.
+    /// Proxy destination is used for a router sending to a different subnet. Routers could know a destination is reachable via its
+    /// routing table, and need to send a message destined for a different subnet to some interface. Normally, sending to a different subnet
+    /// would require the default gateway, but a router port does not have a default gateway. Instead, proxied_destination is used to override the
+    /// default gateway, resolving to the correct MAC address of the interface the router knows the destination is reachable through.
     ///
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false otherwise.

@@ -141,8 +141,6 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     let data: Vec<u8> = "Hello, world!".as_bytes().into();
 
     // Act
-    r1.send_rip_frames();
-    r2.send_rip_frames();
     sim.tick();
 
     r1.route();
