@@ -227,7 +227,7 @@ impl ByteSerialize for ArpFrame {
 
 #[derive(Debug, PartialEq)]
 pub struct IcmpFrame {
-    pub icmp_type: u8, // 0: Echo reply, 8: Echo request
+    pub icmp_type: u8, // 0: Echo reply, 3: destination unreachable, 8: Echo request
     pub code: u8,
     pub checksum: u16,
     pub identifier: u16,
@@ -259,6 +259,10 @@ impl IcmpFrame {
 
     pub fn echo_reply(identifier: u16, sequence_number: u16, data: Vec<u8>) -> IcmpFrame {
         IcmpFrame::new(0, 0, identifier, sequence_number, data)
+    }
+
+    pub fn destination_unreachable(code: u8, data: Vec<u8>) -> IcmpFrame {
+        IcmpFrame::new(3, code, 0, 0, data)
     }
 }
 

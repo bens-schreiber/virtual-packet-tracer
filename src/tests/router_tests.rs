@@ -2,9 +2,58 @@
 
 use crate::{
     device::{cable::CableSimulator, router::Router},
-    ipv4::{interface::Ipv4Interface, Ipv4Frame},
+    ethernet::ByteSerialize,
+    ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Frame},
     mac_addr,
 };
+
+#[test]
+fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut r = Router::from_seed(2);
+
+    r.enable_interface(0, [192, 168, 1, 1], [255, 255, 255, 0]);
+    r.connect(0, &mut i1);
+
+    sim.add(i1.ethernet.port());
+    sim.adds(r.ports());
+
+    let data: Vec<u8> = "Hello, world!".as_bytes().into();
+
+    // Act
+    i1.send([192, 168, 2, 1], data.clone()); // ---- i1 -> r ARP
+    sim.tick();
+
+    r.route();
+    sim.tick();
+
+    i1.receive(); // ---- i1 -> r send frame
+    sim.tick();
+
+    r.route();
+    sim.tick();
+
+    let i1_data = i1.receive();
+
+    // Assert
+    assert_eq!(i1_data.len(), 1);
+    assert_eq!(
+        i1_data[0],
+        Ipv4Frame::new(
+            i1.default_gateway.unwrap(),
+            [192, 168, 1, 2],
+            64,
+            IcmpFrame::destination_unreachable(0, vec![]).to_bytes()
+        )
+    );
+}
 
 #[test]
 fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {

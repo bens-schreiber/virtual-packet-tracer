@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     ethernet::{ByteSerialize, MacAddress},
-    ipv4::{interface::Ipv4Interface, Ipv4Address},
+    ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Address},
     is_ipv4_multicast_or_broadcast, mac_addr, network_address,
 };
 
@@ -36,6 +36,7 @@ impl Route {
     }
 }
 
+/// A layer 3 router that routes IPv4 frames between interfaces, and broadcasts RIP frames on all RIP-enabled interfaces.
 pub struct Router {
     ports: [RefCell<RouterPort>; 8],    // 8 physical ports
     table: HashMap<Ipv4Address, Route>, // network address => route
@@ -141,9 +142,15 @@ impl Router {
                         frame.ttl - 1,
                         frame.data,
                     );
+
+                    continue;
                 }
 
-                // TODO: ELSE: ICMP Destination Unreachable, maybe a default route?
+                // ICMP Destination Unreachable
+                let destination_unreachable = IcmpFrame::destination_unreachable(0, vec![]);
+                rp.interface
+                    .borrow_mut()
+                    .send(frame.source, destination_unreachable.to_bytes());
             }
         }
     }
