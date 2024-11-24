@@ -215,6 +215,18 @@ impl Ipv4Interface {
             .send(mac_multicast_addr!(), EtherType::Ipv4, frame.to_bytes());
     }
 
+    /// Sends an ICMP echo request to the destination IP address.
+    /// * `destination` - The destination IP address to send the ping to.
+    ///
+    /// # Returns
+    /// True if the ping required an ARP request and the ARP request was sent, false otherwise.
+    pub fn ping(&mut self, destination: Ipv4Address) -> bool {
+        return self.send(
+            destination,
+            IcmpFrame::echo_request(0, 0, vec![]).to_bytes(),
+        );
+    }
+
     /// Receives data from the ethernet interface. Processes ARP frames to the ARP table.
     ///
     /// Sends an ARP reply if this interface is the target.
@@ -234,50 +246,78 @@ impl Ipv4Interface {
             };
 
             if f.ether_type == EtherType::Ipv4 {
-                let ipv4_frame = match Ipv4Frame::from_bytes(f.data) {
-                    Ok(ipv4_frame) => ipv4_frame,
-                    Err(_) => continue, // Discard invalid Ipv4 frames
-                };
-
-                // Passive arp table filling: Update the ARP table with the sender's MAC address
-                self.arp_table.insert(ipv4_frame.source, f.source_address);
-                ipv4_frames.push(ipv4_frame);
+                if let Ok(ipv4_frame) = Ipv4Frame::from_bytes(f.data) {
+                    self._receive_ipv4(ipv4_frame, f.source_address, &mut ipv4_frames);
+                }
                 continue;
             }
 
             if f.ether_type == EtherType::Arp {
-                let arp_frame = match ArpFrame::from_bytes(f.data) {
-                    Ok(arp_frame) => arp_frame,
-                    Err(_) => continue, // Discard invalid ARP frames
-                };
-
-                // Update the ARP table with the sender's MAC address
-                self.arp_table
-                    .insert(arp_frame.sender_ip, arp_frame.sender_mac);
-
-                // Update the ARP table with the target's MAC address
-                if arp_frame.opcode == ArpOperation::Reply {
-                    self.arp_table
-                        .insert(arp_frame.sender_ip, arp_frame.sender_mac);
-                    continue;
-                }
-
-                let destination_mac: Option<MacAddress> = {
-                    if arp_frame.target_ip == self.ip_address {
-                        Some(arp_frame.sender_mac)
-                    } else {
-                        self.arp_table.get(&arp_frame.target_ip).copied()
-                    }
-                };
-
-                // Reply if this interface has the value
-                if let Some(destination_mac) = destination_mac {
-                    self.ethernet
-                        .arp_reply(self.ip_address, destination_mac, arp_frame.sender_ip);
+                if let Ok(arp_frame) = ArpFrame::from_bytes(f.data) {
+                    self._receive_arp(arp_frame);
                 }
             }
         }
 
+        self._process_arp_buf();
+
+        ipv4_frames
+    }
+
+    /// Passively fill arp table, reply to ICMP echo requests, and add Ipv4Frames to the vector.
+    fn _receive_ipv4(
+        &mut self,
+        frame: Ipv4Frame,
+        source_mac: MacAddress,
+        ipv4_frames: &mut Vec<Ipv4Frame>,
+    ) {
+        // Passive arp table filling: Update the ARP table with the sender's MAC address
+        self.arp_table.insert(frame.source, source_mac);
+
+        // On ICMP echo request, reply with an echo reply
+        if let Ok(icmp_frame) = IcmpFrame::from_bytes(frame.data.clone()) {
+            if icmp_frame.icmp_type == 8 {
+                let reply = IcmpFrame::new(
+                    0,
+                    icmp_frame.code,
+                    icmp_frame.identifier,
+                    icmp_frame.sequence_number,
+                    icmp_frame.data,
+                );
+
+                self.sendv(self.ip_address, frame.source, None, 64, reply.to_bytes());
+                return;
+            }
+        }
+        ipv4_frames.push(frame);
+    }
+
+    fn _receive_arp(&mut self, frame: ArpFrame) {
+        // Update the ARP table with the sender's MAC address
+        self.arp_table.insert(frame.sender_ip, frame.sender_mac);
+
+        // Update the ARP table with the target's MAC address
+        if frame.opcode == ArpOperation::Reply {
+            self.arp_table.insert(frame.sender_ip, frame.sender_mac);
+            return;
+        }
+
+        let destination_mac: Option<MacAddress> = {
+            if frame.target_ip == self.ip_address {
+                Some(frame.sender_mac)
+            } else {
+                self.arp_table.get(&frame.target_ip).copied()
+            }
+        };
+
+        // Reply if this interface has the value
+        if let Some(destination_mac) = destination_mac {
+            self.ethernet
+                .arp_reply(self.ip_address, destination_mac, frame.sender_ip);
+        }
+    }
+
+    fn _process_arp_buf(&mut self) {
         // Resolve ARP frames in the buffer
         for i in 0..self.arp_buf.len() {
             let w = &mut self.arp_buf[i];
@@ -313,7 +353,5 @@ impl Ipv4Interface {
         {
             self.arp_buf.pop();
         }
-
-        ipv4_frames
     }
 }

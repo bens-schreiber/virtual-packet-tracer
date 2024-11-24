@@ -224,3 +224,85 @@ impl ByteSerialize for ArpFrame {
         })
     }
 }
+
+#[derive(Debug, PartialEq)]
+pub struct IcmpFrame {
+    pub icmp_type: u8, // 0: Echo reply, 8: Echo request
+    pub code: u8,
+    pub checksum: u16,
+    pub identifier: u16,
+    pub sequence_number: u16,
+    pub data: Vec<u8>,
+}
+
+impl IcmpFrame {
+    pub fn new(
+        icmp_type: u8,
+        icmp_code: u8,
+        identifier: u16,
+        sequence_number: u16,
+        data: Vec<u8>,
+    ) -> IcmpFrame {
+        IcmpFrame {
+            icmp_type,
+            code: icmp_code,
+            checksum: 0, // TODO: Calculate checksum
+            identifier,
+            sequence_number,
+            data,
+        }
+    }
+
+    pub fn echo_request(identifier: u16, sequence_number: u16, data: Vec<u8>) -> IcmpFrame {
+        IcmpFrame::new(8, 0, identifier, sequence_number, data)
+    }
+
+    pub fn echo_reply(identifier: u16, sequence_number: u16, data: Vec<u8>) -> IcmpFrame {
+        IcmpFrame::new(0, 0, identifier, sequence_number, data)
+    }
+}
+
+impl ByteSerialize for IcmpFrame {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.icmp_type);
+        bytes.push(self.code);
+        bytes.extend_from_slice(&self.checksum.to_be_bytes());
+        bytes.extend_from_slice(&self.identifier.to_be_bytes());
+        bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
+        bytes.extend_from_slice(&self.data);
+        bytes
+    }
+
+    fn from_bytes(bytes: Vec<u8>) -> Result<IcmpFrame, std::io::Error> {
+        if bytes.len() < 8 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Insufficient bytes for ICMP frame; Runt frame.",
+            ));
+        }
+
+        if bytes.len() > 65535 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Oversized ICMP frame; Giant frame.",
+            ));
+        }
+
+        let icmp_type = bytes[0];
+        let code = bytes[1];
+        let checksum = u16::from_be_bytes([bytes[2], bytes[3]]);
+        let identifier = u16::from_be_bytes([bytes[4], bytes[5]]);
+        let sequence_number = u16::from_be_bytes([bytes[6], bytes[7]]);
+        let data = bytes[8..].to_vec();
+
+        Ok(IcmpFrame {
+            icmp_type,
+            code,
+            checksum,
+            identifier,
+            sequence_number,
+            data,
+        })
+    }
+}

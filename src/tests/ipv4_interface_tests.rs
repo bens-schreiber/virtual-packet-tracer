@@ -40,6 +40,20 @@ fn same_subnet_filled_arp_tables() -> (CableSimulator, Ipv4Interface, Ipv4Interf
 }
 
 #[test]
+fn Ipv4_EncapsulateIcmpFrame_GetOriginalFrameAfterSerialization() {
+    // Arrange
+    let frame = IcmpFrame::echo_request(0, 0, vec![1, 2, 3]);
+    let ipv4_frame = Ipv4Frame::new([192, 168, 1, 1], [192, 168, 1, 2], 64, frame.to_bytes());
+
+    // Act
+    let serialized = ipv4_frame.to_bytes();
+    let deserialized = Ipv4Frame::from_bytes(serialized).unwrap();
+
+    // Assert
+    assert_eq!(frame, IcmpFrame::from_bytes(deserialized.data).unwrap());
+}
+
+#[test]
 fn Send_UnknownIpV4_ReceiveArpRequest() {
     // Arrange
     let mut sim = CableSimulator::new();
@@ -310,4 +324,43 @@ fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
     // Assert
     assert!(i1_sent);
     assert!(i2_sent);
+}
+
+#[test]
+fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+    let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
+
+    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+
+    i1.connect(&mut i2);
+
+    // Act
+    i1.ping(i2.ip_address);
+    sim.tick();
+
+    i2.receive(); // Sends ARP reply
+    sim.tick();
+
+    i1.receive(); // Receives ARP reply, sends ICMP request
+    sim.tick();
+
+    i2.receive(); // Receives ICMP request, sends ICMP reply
+    sim.tick();
+
+    let i1_frames = i1.receive(); // Receives ICMP reply
+
+    // Assert
+    assert_eq!(i1_frames.len(), 1);
+    assert_eq!(
+        i1_frames[0],
+        Ipv4Frame::new(
+            i2.ip_address,
+            i1.ip_address,
+            64,
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes()
+        )
+    );
 }
