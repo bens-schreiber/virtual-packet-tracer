@@ -134,7 +134,7 @@ mod EthernetInterfaceTests {
 
         // Act
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-        sim.tick();
+        sim.transmit();
 
         let i1_data = i1.receive();
         let i2_data = i2.receive();
@@ -168,7 +168,7 @@ mod EthernetInterfaceTests {
         // Act
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2));
-        sim.tick();
+        sim.transmit();
 
         let i1_data = i1.receive();
         let i2_data = i2.receive();
@@ -213,7 +213,7 @@ mod EthernetInterfaceTests {
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(2));
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(3));
-        sim.tick();
+        sim.transmit();
         let received_data = i2.receive_eth2();
 
         // Assert
@@ -242,7 +242,7 @@ mod EthernetInterfaceTests {
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(4));
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(5));
         i2.send(i1.mac_address, EtherType::Debug, eth2_data!(6));
-        sim.tick();
+        sim.transmit();
         let i1_data = i1.receive_eth2();
         let i2_data = i2.receive_eth2();
 
@@ -269,7 +269,7 @@ mod EthernetInterfaceTests {
 
         // Act
         i1.send(i1.mac_address, EtherType::Debug, eth2_data!(1));
-        sim.tick();
+        sim.transmit();
 
         let i1_data = i1.receive();
 
@@ -312,7 +312,7 @@ mod EthernetInterfaceTests {
         // Act
         i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
         i1.send8023(i2.mac_address, eth802_3_data!(2));
-        sim.tick();
+        sim.transmit();
 
         let i2_data = i2.receive();
 

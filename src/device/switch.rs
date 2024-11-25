@@ -3,6 +3,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     ethernet::{interface::*, *},
     is_mac_multicast_or_broadcast, mac_addr,
+    tick::{TickTimer, Tickable},
+    tseconds,
 };
 
 use super::cable::*;
@@ -33,6 +35,12 @@ struct SwitchPort {
     bid: Option<u64>, // The bridge ID of the connected port. None if the port has never received a BPDU.
 }
 
+#[derive(Hash, Eq, PartialEq, Clone)]
+enum SwitchDelayedAction {
+    BpduMulticast,
+    RstpInit,
+}
+
 /// A layer two switch; forwards Ethernet frames to the correct interface.
 ///
 /// Implements IEEE 802.1W Rapid Spanning Tree Protocol (RSTP) to prevent loops.
@@ -46,6 +54,8 @@ pub struct Switch {
     root_bid: u64,            // Root Bridge ID = Root MAC Address + Root Priority
     root_cost: u32,           // The cost of the path to the root bridge ; 0 for the root bridge
     root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
+
+    timer: TickTimer<SwitchDelayedAction>,
 
     debug_tag: u8,
 }
@@ -86,6 +96,7 @@ impl Switch {
             root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority), // Assume the switch is the root bridge
             root_cost: 0,
             root_port: None,
+            timer: TickTimer::new(),
             debug_tag: mac_seed,
         }
     }
@@ -331,21 +342,29 @@ impl Switch {
     }
 
     /// Begins STP by initializing all ports to the Discarding state and flooding Hello BPDUs.
+    ///
+    /// The switch will wait 15 seconds before transitioning to `finish_init_stp`.
     pub fn init_stp(&mut self) {
         for stp_port in self.ports.iter() {
             stp_port.borrow_mut().stp_state = StpState::Discarding;
         }
         self._send_bpdus(true, true, true);
+
+        self.timer
+            .schedule(SwitchDelayedAction::RstpInit, tseconds!(15), false);
     }
 
     /// Opens all ports that haven't acted in the STP process to the Forwarding state.
-    pub fn finish_stp(&mut self) {
+    pub fn finish_init_stp(&mut self) {
         for stp_port in self.ports.iter() {
             if stp_port.borrow().bid.is_none() {
                 stp_port.borrow_mut().stp_role = Some(StpRole::Designated);
                 stp_port.borrow_mut().stp_state = StpState::Forwarding;
             }
         }
+
+        self.timer
+            .schedule(SwitchDelayedAction::BpduMulticast, tseconds!(2), true);
     }
 
     /// Disconnects a port from the switch. Reworks the STP roles and states.
@@ -565,6 +584,25 @@ impl Switch {
                 sp.stp_state = StpState::Forwarding;
             }
         }
+    }
+}
+
+impl Tickable for Switch {
+    fn tick(&mut self, _tick: u32) {
+        self.forward();
+
+        for action in self.timer.ready() {
+            match action {
+                SwitchDelayedAction::BpduMulticast => {
+                    self._send_bpdus(false, false, false);
+                }
+                SwitchDelayedAction::RstpInit => {
+                    self.finish_init_stp();
+                }
+            }
+        }
+
+        self.timer.tick(_tick);
     }
 }
 

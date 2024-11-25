@@ -29,16 +29,16 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
 
     // Act
     i1.send([192, 168, 2, 1], data.clone()); // ---- i1 -> r ARP
-    sim.tick();
+    sim.transmit();
 
     r.route();
-    sim.tick();
+    sim.transmit();
 
     i1.receive(); // ---- i1 -> r send frame
-    sim.tick();
+    sim.transmit();
 
     r.route();
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
 
@@ -77,13 +77,13 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
 
     // Act
     i1.send(i1.default_gateway.unwrap(), data.clone());
-    sim.tick();
+    sim.transmit();
 
     r.route();
-    sim.tick();
+    sim.transmit();
 
     i1.receive();
-    sim.tick();
+    sim.transmit();
 
     // Assert
     let r_p0_receive = r.receive_port(0);
@@ -125,22 +125,22 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
 
     // Act
     i1.send(i2.ip_address, data.clone()); // ---- i1 -> r Resolve mac addresses
-    sim.tick();
+    sim.transmit();
 
     r.route();
-    sim.tick();
+    sim.transmit();
 
     i1.receive(); // ---- i1 -> r send frame
-    sim.tick();
+    sim.transmit();
 
     r.route(); // ---- r -> i2 Resolve mac addresses
-    sim.tick();
+    sim.transmit();
 
     i2.receive();
-    sim.tick();
+    sim.transmit();
 
     r.route(); // ---- r -> i2 send frame
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive();
 
@@ -190,23 +190,23 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     let data: Vec<u8> = "Hello, world!".as_bytes().into();
 
     // Act
-    sim.tick();
+    sim.transmit();
 
     r1.route();
     r2.route();
-    sim.tick();
+    sim.transmit();
 
     i1.send(i2.ip_address, data.clone());
 
     for _ in 0..6 {
-        sim.tick();
+        sim.transmit();
         i1.receive();
         i2.receive();
         r1.route();
         r2.route();
     }
 
-    sim.tick();
+    sim.transmit();
     let i2_data = i2.receive();
 
     // Assert

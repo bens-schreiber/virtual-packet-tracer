@@ -1,3 +1,4 @@
+use crate::tick::Tickable;
 use std::{cell::RefCell, rc::Rc};
 
 /// Simulates the movement of data.
@@ -29,9 +30,7 @@ impl CableSimulator {
     /// Simulates the movement of data over the physical connection.
     ///
     /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
-    ///
-    /// All data in this simulation is moved in a single tick, cables are synchronous and instantaneous.
-    pub fn tick(&self) {
+    pub fn transmit(&mut self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
 
@@ -44,6 +43,12 @@ impl CableSimulator {
             // No connection, clear outgoing
             port.consume_outgoing(&mut EthernetPort::new());
         }
+    }
+}
+
+impl Tickable for CableSimulator {
+    fn tick(&mut self, _tick: u32) {
+        self.transmit();
     }
 }
 

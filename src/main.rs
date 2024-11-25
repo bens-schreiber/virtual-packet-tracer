@@ -2,6 +2,7 @@
 
 mod ethernet;
 mod ipv4;
+mod tick;
 
 mod device {
     pub mod cable;
@@ -16,6 +17,7 @@ mod tests {
     pub mod ipv4_interface_tests;
     pub mod router_tests;
     pub mod switch_tests;
+    pub mod tick_tests;
 }
 
 fn main() {

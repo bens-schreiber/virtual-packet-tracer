@@ -24,9 +24,9 @@ pub fn Forward_ReceiveNotInTable_FloodsFrame() {
 
     // Act
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
     let i2_data = i2.receive();
@@ -76,17 +76,17 @@ pub fn Forward_ReceiveInTable_ForwardsFrame() {
     sim.adds(switch.ports());
 
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
     switch.forward(); // Switch learns MAC address of i1
-    sim.tick();
+    sim.transmit();
     i2.receive(); // dump incoming data
     i3.receive(); // dump incoming data
 
     // Act
     i2.send(i1.mac_address, EtherType::Debug, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
     let received_data3 = i3.receive();
@@ -125,17 +125,17 @@ fn Forward_ReceiveBroadcastAddr_DoesNotUpdateTableAndFloodsFrame() {
 
     // Act
     i1.send(mac_broadcast_addr!(), EtherType::Debug, eth2_data!(1)); // Send broadcast
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive(); // Receive broadcast
     let i3_data = i3.receive(); // Receive broadcast
 
     i1.send(mac_broadcast_addr!(), EtherType::Debug, eth2_data!(2)); // Send broadcast
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i2_data2 = i2.receive(); // Receive broadcast
     let i3_data2 = i3.receive(); // Receive broadcast
@@ -183,7 +183,7 @@ fn SpanningTree_Init_SendsBpdus() {
 
     // Act
     switch.init_stp();
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
 
@@ -235,9 +235,9 @@ fn SpanningTree_Init_DiscardsEndDevices() {
     // Act
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     switch.init_stp();
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive_eth2();
 
@@ -255,10 +255,10 @@ fn SpanningTree_SingleSwitch_ElectsSelfAsRoot() {
 
     // Act
     switch.init_stp();
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
-    switch.finish_stp();
+    sim.transmit();
+    switch.finish_init_stp();
 
     // Assert
     assert!(switch.is_root_bridge());
@@ -277,15 +277,15 @@ fn SpanningTree_FinishInit_NoMoreBpdus() {
     // Act
     switch.init_stp();
     let has_outgoing1 = switch.ports()[0].borrow().has_outgoing();
-    sim.tick();
+    sim.transmit();
 
     switch.forward();
     let has_outgoing2 = switch.ports()[0].borrow().has_outgoing();
-    sim.tick();
+    sim.transmit();
 
-    switch.finish_stp();
+    switch.finish_init_stp();
     let has_outgoing3 = switch.ports()[0].borrow().has_outgoing();
-    sim.tick();
+    sim.transmit();
 
     // Assert
     assert!(has_outgoing1);
@@ -311,15 +311,15 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
 
     // Act
     switch.init_stp();
-    sim.tick();
+    sim.transmit();
 
     switch.forward();
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
-    switch.finish_stp();
+    switch.finish_init_stp();
 
-    sim.tick();
+    sim.transmit();
     switch.forward();
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive_eth2();
 
@@ -347,13 +347,13 @@ fn SpanningTree_TwoConnectedFinishStp_BpdusEnd() {
     let s1_has_outgoing1 = s1.ports()[0].borrow().has_outgoing();
     let s2_has_outgoing1 = s2.ports()[1].borrow().has_outgoing();
 
-    sim.tick();
+    sim.transmit();
     s1.forward();
     s2.forward();
     let s1_has_outgoing2 = s1.ports()[0].borrow().has_outgoing();
     let s2_has_outgoing2 = s2.ports()[1].borrow().has_outgoing();
 
-    sim.tick();
+    sim.transmit();
     let s1_has_outgoing3 = s1.ports()[0].borrow().has_outgoing();
     let s2_has_outgoing3 = s2.ports()[1].borrow().has_outgoing();
 
@@ -385,12 +385,12 @@ fn SpanningTree_TwoConnectedFinishStp_ElectsRootPortAndDesignatedPort() {
     // Act
     s1.init_stp();
     s2.init_stp();
-    sim.tick();
+    sim.transmit();
     s1.forward();
     s2.forward();
-    sim.tick();
-    s1.finish_stp();
-    s2.finish_stp();
+    sim.transmit();
+    s1.finish_init_stp();
+    s2.finish_init_stp();
 
     // Assert
     assert!(s1.root_port().is_none());
@@ -422,12 +422,12 @@ fn SpanningTree_BiConnectEquivalentPriorities_ElectsWithBidTiebreaker() {
     // Act
     s1.init_stp();
     s2.init_stp();
-    sim.tick();
+    sim.transmit();
     s1.forward();
     s2.forward();
-    sim.tick();
-    s1.finish_stp();
-    s2.finish_stp();
+    sim.transmit();
+    s1.finish_init_stp();
+    s2.finish_init_stp();
 
     // Assert
     assert_eq!(s1.root_port(), Some(s1_s2_port));
@@ -505,7 +505,7 @@ fn complete_network() -> (
 fn SpanningTree_CompleteNetwork_BpdusEnd() {
     // Arrange
     let (
-        sim,
+        mut sim,
         mut s1,
         mut s2,
         mut s3,
@@ -525,7 +525,7 @@ fn SpanningTree_CompleteNetwork_BpdusEnd() {
     let s3_has_outgoing_s1_1 = s3.ports()[s3_s1_port].borrow().has_outgoing();
     let s3_has_outgoing_s2_1 = s3.ports()[s3_s2_port].borrow().has_outgoing();
 
-    sim.tick();
+    sim.transmit();
     s1.forward();
     s2.forward();
     s3.forward();
@@ -536,7 +536,7 @@ fn SpanningTree_CompleteNetwork_BpdusEnd() {
     let s3_has_outgoing_s1_2 = s3.ports()[s3_s1_port].borrow().has_outgoing();
     let s3_has_outgoing_s2_2 = s3.ports()[s3_s2_port].borrow().has_outgoing();
 
-    sim.tick();
+    sim.transmit();
     s1.forward();
     s2.forward();
     s3.forward();
@@ -580,7 +580,7 @@ fn stp_complete_network() -> (
     (usize, usize, usize, usize, usize, usize),
 ) {
     let (
-        sim,
+        mut sim,
         mut s1,
         mut s2,
         mut s3,
@@ -594,16 +594,16 @@ fn stp_complete_network() -> (
     s3.init_stp();
 
     for _ in 0..3 {
-        sim.tick();
+        sim.transmit();
         s1.forward();
         s2.forward();
         s3.forward();
     }
     i1.receive(); // dump incoming data, just bpdu frames we don't care about
     i2.receive(); // dump incoming data, just bpdu frames we don't care about
-    s1.finish_stp();
-    s2.finish_stp();
-    s3.finish_stp();
+    s1.finish_init_stp();
+    s2.finish_init_stp();
+    s3.finish_init_stp();
     (
         sim,
         s1,
@@ -659,14 +659,14 @@ fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts()
 #[test]
 fn SpanningTree_CompleteGraphFinishedStp_Ethernet2FramesDoNotUseBlockedPort() {
     // Arrange
-    let (sim, mut s1, mut s2, mut s3, mut i1, mut i2, _) = stp_complete_network();
+    let (mut sim, mut s1, mut s2, mut s3, mut i1, mut i2, _) = stp_complete_network();
 
     // Act
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(1));
     i2.send(i1.mac_address, EtherType::Debug, eth2_data!(2));
 
     for _ in 0..3 {
-        sim.tick();
+        sim.transmit();
         s1.forward();
         s2.forward();
         s3.forward();
@@ -675,7 +675,7 @@ fn SpanningTree_CompleteGraphFinishedStp_Ethernet2FramesDoNotUseBlockedPort() {
         assert!(i2.receive().is_empty());
     }
 
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
     let i2_data = i2.receive();
@@ -725,7 +725,7 @@ fn SpanningTree_ExistingNetworkReceiveTcnBpdu_UpdateDesignatedPorts() {
     // Act
     s4.init_stp();
     for _ in 0..10 {
-        sim.tick();
+        sim.transmit();
         s1.forward();
         s2.forward();
         s3.forward();
@@ -768,13 +768,13 @@ fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
     // Act
     s4.init_stp();
     for _ in 0..100 {
-        sim.tick();
+        sim.transmit();
         s1.forward();
         s2.forward();
         s3.forward();
         s4.forward();
     }
-    s4.finish_stp();
+    s4.finish_init_stp();
 
     // Assert
     assert_eq!(s4.root_bid(), s4.bid());
@@ -819,18 +819,18 @@ fn SpanningTree_TwoSwitchesDisconnectedRootPort_ElectSelfAsRootBridge() {
 
     s1.init_stp();
     s2.init_stp();
-    sim.tick();
+    sim.transmit();
 
     s1.forward();
     s2.forward();
-    sim.tick();
+    sim.transmit();
 
     s1.forward();
     s2.forward();
-    sim.tick();
+    sim.transmit();
 
-    s1.finish_stp();
-    s2.finish_stp();
+    s1.finish_init_stp();
+    s2.finish_init_stp();
 
     // Act
     s1.disconnect(s1_s2_port);
@@ -851,7 +851,7 @@ fn SpanningTree_TwoSwitchesDisconnectedRootPort_ElectSelfAsRootBridge() {
 #[test]
 fn SpanningTree_CompleteNetworkDisconnectRootPort_ElectsNewRoot() {
     // Arrange
-    let (sim, mut s1, mut s2, mut s3, _, _, (_, _, s2_s1_port, _, s3_s1_port, s3_s2_port)) =
+    let (mut sim, mut s1, mut s2, mut s3, _, _, (_, _, s2_s1_port, _, s3_s1_port, s3_s2_port)) =
         stp_complete_network();
 
     // Act
@@ -859,7 +859,7 @@ fn SpanningTree_CompleteNetworkDisconnectRootPort_ElectsNewRoot() {
     s3.disconnect(s3_s1_port);
 
     for _ in 0..2 {
-        sim.tick();
+        sim.transmit();
         s1.forward();
         s2.forward();
         s3.forward();

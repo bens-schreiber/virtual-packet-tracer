@@ -4,23 +4,18 @@ use crate::{
     ethernet::{ByteSerialize, MacAddress},
     ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Address},
     is_ipv4_multicast_or_broadcast, mac_addr, network_address,
+    tick::{TickTimer, Tickable},
+    tseconds,
 };
 
 use super::cable::EthernetPort;
 
-#[derive(Debug)]
-struct RouterPort {
-    interface: RefCell<Ipv4Interface>,
-    enabled: bool,
-    rip_enabled: bool,
-}
-
+/// A route in the router's routing table.
 #[derive(Debug, Eq, PartialEq, Hash)]
 struct Route {
-    ip_address: Ipv4Address,
+    ip_address: Ipv4Address, // Network address
     subnet_mask: Ipv4Address,
-    next_hop: Ipv4Address,
-    metric: u32,
+    metric: u32, // Hops until the destination
     port: usize,
 }
 
@@ -29,11 +24,22 @@ impl Route {
         Route {
             ip_address,
             subnet_mask,
-            next_hop: [0, 0, 0, 0],
             metric: 0,
             port,
         }
     }
+}
+
+#[derive(Debug)]
+struct RouterPort {
+    interface: RefCell<Ipv4Interface>,
+    enabled: bool,
+    rip_enabled: bool,
+}
+
+#[derive(Hash, Eq, PartialEq, Clone)]
+enum RouterDelayedAction {
+    RipMulticast,
 }
 
 /// A layer 3 router that routes IPv4 frames between interfaces, and broadcasts RIP frames on all RIP-enabled interfaces.
@@ -41,9 +47,8 @@ pub struct Router {
     ports: [RefCell<RouterPort>; 8],    // 8 physical ports
     table: HashMap<Ipv4Address, Route>, // network address => route
     mac_address: MacAddress,
-    debug_tag: u8,
-
     rip_enabled: bool,
+    timer: TickTimer<RouterDelayedAction>,
 }
 
 impl Router {
@@ -78,8 +83,8 @@ impl Router {
             ports,
             table: HashMap::new(),
             mac_address: mac_addr!(mac_seed),
-            debug_tag: mac_seed,
             rip_enabled: false,
+            timer: TickTimer::new(),
         }
     }
 
@@ -105,7 +110,6 @@ impl Router {
                         let new_route = Route {
                             ip_address: frame.source,
                             subnet_mask: rip_route.subnet_mask,
-                            next_hop: rip_route.next_hop,
                             metric: rip_route.metric + 1,
                             port: i,
                         };
@@ -161,7 +165,7 @@ impl Router {
             frame.routes.push(RipRoute::new(
                 k.clone(),
                 v.subnet_mask,
-                v.next_hop,
+                [0, 0, 0, 0],
                 v.metric,
             ));
         }
@@ -246,6 +250,9 @@ impl Router {
         self.rip_enabled = true;
         rp.rip_enabled = true;
         rp.interface.borrow_mut().multicast(frame.to_bytes());
+
+        self.timer
+            .schedule(RouterDelayedAction::RipMulticast, tseconds!(5), true);
     }
 
     /// Connects an interface to the router with the given port number.
@@ -305,12 +312,28 @@ impl Router {
     }
 }
 
+impl Tickable for Router {
+    fn tick(&mut self, _tick: u32) {
+        self.route();
+
+        for action in self.timer.ready() {
+            match action {
+                RouterDelayedAction::RipMulticast => {
+                    self.send_rip_frames();
+                }
+            }
+        }
+
+        self.timer.tick(_tick);
+    }
+}
+
 struct RipRoute {
     address_family: u16, // 0x0002
     route_tag: u16,      // 0x0000
     ip_address: Ipv4Address,
     subnet_mask: Ipv4Address,
-    next_hop: Ipv4Address,
+    next_hop: Ipv4Address, // TODO: unused for now
     metric: u32,
 }
 

@@ -21,7 +21,7 @@ fn CableSimulator_Tick_ConsumesAllOutgoing() {
     uc_interface.send(mac_addr!(0), EtherType::Debug, eth2_data!(3));
 
     // Act
-    sim.tick();
+    sim.transmit();
 
     // Assert
     assert!(!i1.port().borrow().has_outgoing());

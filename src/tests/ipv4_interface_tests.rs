@@ -65,7 +65,7 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
 
     // Act
     let i1_sent_arp = !i1.send(i2.ip_address, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.ethernet.receive();
     let i2_data = i2.ethernet.receive();
@@ -105,11 +105,11 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
 
     // Act
     i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
-    sim.tick();
+    sim.transmit();
 
     i2.receive(); // Sends ARP reply
 
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.ethernet.receive();
 
@@ -145,11 +145,11 @@ fn Send_UnknownIpV4AfterMultipleRetries_ReceiveMultipleArpRequests() {
 
     // Act
     i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
-    sim.tick();
+    sim.transmit();
 
     for _ in 0..90 {
         i1.receive();
-        sim.tick(); // 30 ticks to retry
+        sim.transmit(); // 30 ticks to retry
     }
 
     let i2_data = i2.ethernet.receive();
@@ -161,11 +161,11 @@ fn Send_UnknownIpV4AfterMultipleRetries_ReceiveMultipleArpRequests() {
 #[test]
 fn Send_SameSubnet_ReceivesIpv4Frame() {
     // Arrange
-    let (sim, mut i1, mut i2) = same_subnet_filled_arp_tables();
+    let (mut sim, mut i1, mut i2) = same_subnet_filled_arp_tables();
 
     // Act
     let i1_sent = i1.send(i2.ip_address, eth2_data!(1)); // Sends Ipv4 frame
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive();
 
@@ -190,18 +190,18 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
 
     // Act
     i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
-    sim.tick();
+    sim.transmit();
 
     for _ in 0..60 {
         i1.receive();
-        sim.tick(); // 30 ticks to retry
+        sim.transmit(); // 30 ticks to retry
     }
 
     i2.receive(); // Sends ARP reply(s)
 
-    sim.tick();
+    sim.transmit();
     i1.receive(); // Receives arp reply, now table is filled, sends original request
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive();
 
@@ -234,7 +234,7 @@ fn Send_DifferentSubnet_SendsToDefaultGateway() {
 
     // Act
     let i1_sent = i1.send([192, 168, 2, 1], eth2_data!(1));
-    sim.tick();
+    sim.transmit();
     let dg_received = default_gateway.ethernet.receive();
 
     // Assert
@@ -262,13 +262,13 @@ fn Send_FillsArpTableOnReceive_SendsWithoutArp() {
 
     // Act
     let i1_sends = i1.send(i2.ip_address, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive(); // Should fill ARP table passively
-    sim.tick();
+    sim.transmit();
 
     let i2_sends = i2.send(i1.ip_address, eth2_data!(2));
-    sim.tick();
+    sim.transmit();
 
     let i1_data = i1.receive();
 
@@ -303,7 +303,7 @@ fn Send_DifferentSubnetsWithoutDefaultGateway_DropsFrame() {
 
     // Act
     let i1_sent = i1.send(i2.ip_address, eth2_data!(1));
-    sim.tick();
+    sim.transmit();
 
     let i2_data = i2.receive();
 
@@ -339,16 +339,16 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
 
     // Act
     i1.ping(i2.ip_address);
-    sim.tick();
+    sim.transmit();
 
     i2.receive(); // Sends ARP reply
-    sim.tick();
+    sim.transmit();
 
     i1.receive(); // Receives ARP reply, sends ICMP request
-    sim.tick();
+    sim.transmit();
 
     i2.receive(); // Receives ICMP request, sends ICMP reply
-    sim.tick();
+    sim.transmit();
 
     let i1_frames = i1.receive(); // Receives ICMP reply
 
