@@ -8,7 +8,6 @@ use crate::{
     },
     network_address,
     simulation::tick::{TickTimer, Tickable},
-    tseconds,
 };
 
 use super::cable::EthernetPort;
@@ -255,7 +254,7 @@ impl Router {
         rp.interface.borrow_mut().multicast(frame.to_bytes());
 
         self.timer
-            .schedule(RouterDelayedAction::RipMulticast, tseconds!(5), true);
+            .schedule(RouterDelayedAction::RipMulticast, 5, true);
     }
 
     /// Connects an interface to the router with the given port number.
@@ -316,7 +315,7 @@ impl Router {
 }
 
 impl Tickable for Router {
-    fn tick(&mut self, _tick: u32) {
+    fn tick(&mut self) {
         self.route();
 
         for action in self.timer.ready() {
@@ -327,7 +326,7 @@ impl Tickable for Router {
             }
         }
 
-        self.timer.tick(_tick);
+        self.timer.tick();
     }
 }
 

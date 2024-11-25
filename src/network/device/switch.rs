@@ -4,7 +4,6 @@ use crate::{
     is_mac_multicast_or_broadcast, mac_addr,
     network::ethernet::{interface::*, *},
     simulation::tick::{TickTimer, Tickable},
-    tseconds,
 };
 
 use super::cable::*;
@@ -351,7 +350,7 @@ impl Switch {
         self._send_bpdus(true, true, true);
 
         self.timer
-            .schedule(SwitchDelayedAction::RstpInit, tseconds!(15), false);
+            .schedule(SwitchDelayedAction::RstpInit, 15, false);
     }
 
     /// Opens all ports that haven't acted in the STP process to the Forwarding state.
@@ -364,7 +363,7 @@ impl Switch {
         }
 
         self.timer
-            .schedule(SwitchDelayedAction::BpduMulticast, tseconds!(2), true);
+            .schedule(SwitchDelayedAction::BpduMulticast, 2, true);
     }
 
     /// Disconnects a port from the switch. Reworks the STP roles and states.
@@ -588,7 +587,7 @@ impl Switch {
 }
 
 impl Tickable for Switch {
-    fn tick(&mut self, _tick: u32) {
+    fn tick(&mut self) {
         self.forward();
 
         for action in self.timer.ready() {
@@ -602,7 +601,7 @@ impl Tickable for Switch {
             }
         }
 
-        self.timer.tick(_tick);
+        self.timer.tick();
     }
 }
 

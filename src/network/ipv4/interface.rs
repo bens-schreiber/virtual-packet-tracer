@@ -46,7 +46,7 @@ macro_rules! network_address {
 #[derive(Debug)]
 struct WaitForArpResolveFrame {
     ip: Ipv4Address, // The address needed to resolve
-    ttl: u8,
+    ttl: u8,         // ticks to live
     retry: u8,
     frame: Ipv4Frame,
 }
@@ -55,16 +55,18 @@ impl WaitForArpResolveFrame {
     fn new(ip: Ipv4Address, frame: Ipv4Frame) -> WaitForArpResolveFrame {
         WaitForArpResolveFrame {
             ip,
-            ttl: 30,
+            ttl: 30, // roughly 1 second in a 30 tick per second simulation
             retry: 3,
             frame,
-        } // 30 ticks ~ 1 second
+        }
     }
 }
 
 /// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
 ///
 /// Contains an ARP table to map IP addresses to MAC addresses.
+///
+/// TODO: Determine if a TickTimer should be used for the buffer TTL.
 #[derive(Debug)]
 pub struct Ipv4Interface {
     pub ethernet: EthernetInterface,
@@ -142,7 +144,7 @@ impl Ipv4Interface {
     ///
     /// # Remarks
     /// Will send an ARP request if the destination MAC address is not in the ARP table.
-    /// The original packet will be sent if the ARP request is successful in the next 30 tickets (~1 second in full simulation).
+    /// The original packet is placed in a buffer to send after the ARP request is resolved within the next 30 ticks
     ///
     /// The key will be either:
     /// 1. The destination IP address if the destination is on the same subnet.

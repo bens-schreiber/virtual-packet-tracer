@@ -47,7 +47,7 @@ impl CableSimulator {
 }
 
 impl Tickable for CableSimulator {
-    fn tick(&mut self, _tick: u32) {
+    fn tick(&mut self) {
         self.transmit();
     }
 }
