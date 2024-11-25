@@ -1,9 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    ethernet::{interface::*, *},
     is_mac_multicast_or_broadcast, mac_addr,
-    tick::{TickTimer, Tickable},
+    network::ethernet::{interface::*, *},
+    simulation::tick::{TickTimer, Tickable},
     tseconds,
 };
 

@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::device::cable::CableSimulator;
-use crate::device::switch::{BpduFrame, Switch};
-use crate::ethernet::{interface::*, ByteSerialize, EtherType, EthernetFrame};
+use crate::network::device::cable::CableSimulator;
+use crate::network::device::switch::{BpduFrame, Switch};
+use crate::network::ethernet::{interface::*, ByteSerialize, EtherType, EthernetFrame};
 use crate::{eth2, eth2_data, mac_addr, mac_bpdu_addr, mac_broadcast_addr};
 
 #[test]

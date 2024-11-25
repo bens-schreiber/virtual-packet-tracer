@@ -1,9 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    device::cable::EthernetPort,
-    ipv4::{ArpFrame, ArpOperation, Ipv4Address},
     mac_addr, mac_broadcast_addr,
+    network::{
+        device::cable::EthernetPort,
+        ipv4::{ArpFrame, ArpOperation, Ipv4Address},
+    },
 };
 
 use super::*;

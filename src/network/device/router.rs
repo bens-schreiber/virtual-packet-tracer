@@ -1,10 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    ethernet::{ByteSerialize, MacAddress},
-    ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Address},
-    is_ipv4_multicast_or_broadcast, mac_addr, network_address,
-    tick::{TickTimer, Tickable},
+    is_ipv4_multicast_or_broadcast, mac_addr,
+    network::{
+        ethernet::{ByteSerialize, MacAddress},
+        ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Address},
+    },
+    network_address,
+    simulation::tick::{TickTimer, Tickable},
     tseconds,
 };
 
@@ -195,7 +198,7 @@ impl Router {
 
     #[cfg(test)]
     /// Receives the IPv4 frames from the interface on a given port instead of routing them.
-    pub fn receive_port(&mut self, port: usize) -> Vec<crate::ipv4::Ipv4Frame> {
+    pub fn receive_port(&mut self, port: usize) -> Vec<crate::network::ipv4::Ipv4Frame> {
         self.ports[port]
             .borrow_mut()
             .interface

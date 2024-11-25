@@ -1,4 +1,4 @@
-use crate::{ethernet::ByteSerialize, ethernet::MacAddress};
+use crate::network::{ethernet::ByteSerialize, ethernet::MacAddress};
 
 pub mod interface;
 

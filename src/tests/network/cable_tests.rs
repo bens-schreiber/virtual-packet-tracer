@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
-use crate::device::cable::CableSimulator;
-use crate::ethernet::{interface::*, EtherType};
+use crate::network::device::cable::CableSimulator;
+use crate::network::ethernet::{interface::*, EtherType};
 use crate::{eth2_data, mac_addr};
 
 #[test]

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::ethernet::interface::EthernetInterface;
-use crate::{ethernet::*, localhost};
+use crate::localhost;
+use crate::network::ethernet::interface::EthernetInterface;
+use crate::network::ethernet::*;
 
 macro_rules! ipv4_multicast_addr {
     () => {

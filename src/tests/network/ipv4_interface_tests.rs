@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::device::cable::CableSimulator;
-use crate::ethernet::ByteSerialize;
-use crate::ethernet::{interface::*, EtherType};
-use crate::ipv4::interface::*;
-use crate::{arp_table, ipv4::*};
+use crate::network::device::cable::CableSimulator;
+use crate::network::ethernet::ByteSerialize;
+use crate::network::ethernet::{interface::*, EtherType};
+use crate::network::ipv4::interface::*;
+use crate::{arp_table, network::ipv4::*};
 use crate::{eth2, eth2_data, mac_addr, mac_broadcast_addr};
 
 fn same_subnet_filled_arp_tables() -> (CableSimulator, Ipv4Interface, Ipv4Interface) {

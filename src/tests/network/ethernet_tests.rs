@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::ethernet::interface::*;
-use crate::ethernet::ByteSerialize;
-use crate::ethernet::*;
+use crate::network::ethernet::interface::*;
+use crate::network::ethernet::ByteSerialize;
+use crate::network::ethernet::*;
 use crate::{eth2, eth2_data, eth802_3_data, mac_addr, mac_broadcast_addr};
 
 mod EthernetFrameTests {
@@ -117,7 +117,7 @@ mod EthernetFrameTests {
 }
 
 mod EthernetInterfaceTests {
-    use crate::device::cable::CableSimulator;
+    use crate::network::device::cable::CableSimulator;
 
     use super::*;
 

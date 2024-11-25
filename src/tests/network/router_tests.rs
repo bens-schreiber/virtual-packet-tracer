@@ -1,11 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::{
+use crate::{mac_addr, network::{
     device::{cable::CableSimulator, router::Router},
     ethernet::ByteSerialize,
     ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Frame},
-    mac_addr,
-};
+}};
 
 #[test]
 fn Route_DoesNotExist_ReceiveDestinationUnreachable() {

@@ -78,7 +78,7 @@ impl ByteSerialize for EthernetFrame {
 #[macro_export]
 macro_rules! eth2 {
     ($destination_address:expr, $source_address:expr, $data:expr, $ether_type:expr) => {
-        crate::ethernet::EthernetFrame::Ethernet2(crate::ethernet::Ethernet2Frame::new(
+        crate::network::ethernet::EthernetFrame::Ethernet2(crate::network::ethernet::Ethernet2Frame::new(
             $destination_address,
             $source_address,
             $data,
