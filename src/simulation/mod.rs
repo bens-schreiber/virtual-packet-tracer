@@ -2,7 +2,6 @@ pub mod tick;
 
 use std::collections::HashMap;
 
-use rand::random;
 use raylib::prelude::*;
 use tick::Tickable;
 
@@ -15,6 +14,7 @@ struct DesktopEntity {
     pos: Vector2,
     desktop: Desktop,
     label: String,
+    adj_list: Vec<EntityId>,
 }
 
 impl DesktopEntity {
@@ -42,14 +42,46 @@ impl DesktopEntity {
         );
     }
 
-    fn connect(&mut self, other: &mut DesktopEntity) {
-        let i1 = &mut self.desktop.interface;
-        let i2 = &mut other.desktop.interface;
+    fn connect(a_i: usize, b_i: usize, devices: &mut Vec<DesktopEntity>) {
+        if a_i == b_i {
+            return;
+        }
 
-        i1.disconnect();
-        i2.disconnect();
+        DesktopEntity::disconnect(a_i, devices);
+        DesktopEntity::disconnect(b_i, devices);
 
-        i1.connect(i2);
+        // Compiler gymnastics to satisfy borrow checker
+        let (left, right) = if a_i < b_i {
+            devices.split_at_mut(b_i)
+        } else {
+            devices.split_at_mut(a_i)
+        };
+
+        let (a, b) = if a_i < b_i {
+            (&mut left[a_i], &mut right[0])
+        } else {
+            (&mut right[0], &mut left[b_i])
+        };
+
+        a.adj_list.push(b.id);
+        b.adj_list.push(a.id);
+
+        a.desktop.interface.connect(&mut b.desktop.interface);
+    }
+
+    fn disconnect(i: usize, devices: &mut Vec<DesktopEntity>) -> usize {
+        let adj_list = devices[i].adj_list.clone();
+        let id = devices[i].id;
+
+        for adj_id in adj_list {
+            let (adj_i, _) = get_entity(adj_id, devices);
+            devices[adj_i].adj_list.retain(|&id_| id_ != id);
+            devices[adj_i].desktop.interface.disconnect();
+        }
+
+        devices[i].adj_list.clear();
+        devices[i].desktop.interface.disconnect();
+        i
     }
 
     fn collides(&self, point: Vector2) -> bool {
@@ -59,10 +91,6 @@ impl DesktopEntity {
 
     fn tick(&mut self) {
         self.desktop.tick();
-    }
-
-    fn disconnect(&mut self) {
-        self.desktop.interface.disconnect();
     }
 }
 
@@ -109,7 +137,6 @@ fn handle_click(
     devices: &mut Vec<DesktopEntity>,
     desktop_count: &mut u64,
     entity_seed: &mut EntityId,
-    adj_list: &mut HashMap<EntityId, Vec<EntityId>>,
 ) {
     // Dropdown is open, ignore other input
     if s.dropdown_open {
@@ -117,6 +144,8 @@ fn handle_click(
     }
 
     let mouse_pos = rl.get_mouse_position();
+
+    // todo: don't need to check this every frame, some lazy eval would be nice
     let mouse_collision: Option<(usize, &DesktopEntity)> = {
         let mut res = None;
         for (i, device) in devices.iter().enumerate() {
@@ -138,34 +167,9 @@ fn handle_click(
         if left_mouse_clicked {
             s.connect_mode = false;
 
-            if let Some((target_i, _target)) = mouse_collision {
-                if _target.id == s.connect_origin_device {
-                    return;
-                }
-
+            if let Some((target_i, _)) = mouse_collision {
                 let (origin_i, _) = get_entity(s.connect_origin_device, devices);
-
-                // Compiler gymnastics B.S
-                let (left, right) = devices.split_at_mut(std::cmp::max(origin_i, target_i));
-                let (origin, target) = if origin_i < target_i {
-                    (&mut left[origin_i], &mut right[target_i - origin_i - 1])
-                } else {
-                    (&mut right[origin_i - target_i - 1], &mut left[target_i])
-                };
-
-                origin.connect(target);
-
-                // Update adjacency list
-                for id in adj_list.get(&origin.id).unwrap_or(&vec![]).clone() {
-                    adj_list.remove(&id);
-                }
-
-                for id in adj_list.get(&target.id).unwrap_or(&vec![]).clone() {
-                    adj_list.remove(&id);
-                }
-
-                adj_list.insert(origin.id, vec![target.id]);
-                adj_list.insert(target.id, vec![origin.id]);
+                DesktopEntity::connect(origin_i, target_i, devices);
             }
         }
 
@@ -203,6 +207,7 @@ fn handle_click(
                 pos: mouse_pos,
                 desktop: Desktop::from_seed(*entity_seed),
                 label: format!("Desktop {}", desktop_count),
+                adj_list: vec![],
             });
             *entity_seed += 1;
             *desktop_count += 1;
@@ -221,12 +226,7 @@ fn handle_click(
     }
 }
 
-fn handle_dropdown(
-    d: &mut RaylibDrawHandle,
-    s: &mut GuiState,
-    devices: &mut Vec<DesktopEntity>,
-    adj_list: &mut HashMap<EntityId, Vec<EntityId>>,
-) {
+fn handle_dropdown(d: &mut RaylibDrawHandle, s: &mut GuiState, devices: &mut Vec<DesktopEntity>) {
     if s.dropdown_open {
         let mut _scroll_index = 0;
 
@@ -249,16 +249,7 @@ fn handle_dropdown(
             // Delete
             1 => {
                 let (i, _) = get_entity(s.dropdown_device, devices);
-                let device = &mut devices[i];
-
-                // Remove from network
-                device.disconnect();
-
-                // Remove from adjacency list
-                for i in adj_list.remove(&s.dropdown_device).unwrap_or_default() {
-                    adj_list.remove(&i);
-                }
-                adj_list.remove(&s.dropdown_device);
+                DesktopEntity::disconnect(i, devices);
                 devices.remove(i);
                 close_dropdown(s);
             }
@@ -274,21 +265,17 @@ fn handle_dropdown(
     }
 }
 
-fn draw_connections(
-    d: &mut RaylibDrawHandle,
-    devices: &Vec<DesktopEntity>,
-    adj_list: &HashMap<EntityId, Vec<EntityId>>,
-) {
-    let id_to_index: HashMap<EntityId, usize> = devices
+fn draw_connections(d: &mut RaylibDrawHandle, devices: &Vec<DesktopEntity>) {
+    let id_lookup: HashMap<EntityId, usize> = devices
         .iter()
         .enumerate()
         .map(|(i, device)| (device.id, i))
         .collect();
 
-    for (id, connections) in adj_list.iter() {
-        let origin = devices[id_to_index[&id]].pos;
-        for connection in connections {
-            let target = devices[id_to_index[connection]].pos;
+    for device in devices {
+        let origin = &device.pos;
+        for adj_id in &device.adj_list {
+            let target = &devices[id_lookup[adj_id]].pos;
             d.draw_line(
                 origin.x as i32,
                 origin.y as i32,
@@ -325,8 +312,6 @@ pub fn run() {
     let mut cable_sim = CableSimulator::new();
     let mut devices: Vec<DesktopEntity> = vec![];
 
-    let mut adj_list: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
-
     let mut s = GuiState::default();
 
     while !rl.window_should_close() {
@@ -336,7 +321,6 @@ pub fn run() {
             &mut devices,
             &mut desktop_count,
             &mut entity_seed,
-            &mut adj_list,
         );
 
         cable_sim.tick();
@@ -346,7 +330,7 @@ pub fn run() {
 
         let mut d = rl.begin_drawing(&thread);
 
-        draw_connections(&mut d, &devices, &adj_list);
+        draw_connections(&mut d, &devices);
 
         if s.connect_mode {
             let mouse_pos = d.get_mouse_position();
@@ -364,7 +348,7 @@ pub fn run() {
             device.render(&mut d);
         }
 
-        handle_dropdown(&mut d, &mut s, &mut devices, &mut adj_list);
+        handle_dropdown(&mut d, &mut s, &mut devices);
 
         d.clear_background(Color::BLACK);
     }
