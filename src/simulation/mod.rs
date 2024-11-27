@@ -138,7 +138,11 @@ fn handle_click(
         if left_mouse_clicked {
             s.connect_mode = false;
 
-            if let Some((target_i, _)) = mouse_collision {
+            if let Some((target_i, _target)) = mouse_collision {
+                if _target.id == s.connect_origin_device {
+                    return;
+                }
+
                 let (origin_i, _) = get_entity(s.connect_origin_device, devices);
 
                 // Compiler gymnastics B.S
