@@ -63,7 +63,7 @@ impl Router {
     /// let router = Router::from_seed(1);
     /// ```
     /// This will create ports of addresses `mac_addr!(1)` through `mac_addr!(7)`.
-    pub fn from_seed(mac_seed: u8) -> Router {
+    pub fn from_seed(mac_seed: u64) -> Router {
         let ports: [RefCell<RouterPort>; 8] = (0..8)
             .map(|i| {
                 RefCell::new(RouterPort {

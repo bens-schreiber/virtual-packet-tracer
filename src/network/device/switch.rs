@@ -55,8 +55,6 @@ pub struct Switch {
     root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
 
     timer: TickTimer<SwitchDelayedAction>,
-
-    debug_tag: u8,
 }
 
 impl Switch {
@@ -71,14 +69,14 @@ impl Switch {
     /// ```
     /// This will create a switch with the switch's MAC address as `mac_addr!(1)` and the interfaces MAC addresses as `mac_addr!(2)` through `mac_addr!(33)`.
     /// The switch will have a bridge priority of 1.
-    pub fn from_seed(mac_seed: u8, bridge_priority: u16) -> Switch {
+    pub fn from_seed(mac_seed: u64, bridge_priority: u16) -> Switch {
         let ports: [RefCell<SwitchPort>; 32] = (0..32)
             .map(|i| {
                 RefCell::new(SwitchPort {
                     interface: EthernetInterface::new(mac_addr!(mac_seed + i + 1)),
                     stp_state: StpState::Forwarding,
                     stp_role: None,
-                    id: i.into(),
+                    id: i as usize,
                     root_cost: 0,
                     bid: None,
                 })
@@ -96,7 +94,6 @@ impl Switch {
             root_cost: 0,
             root_port: None,
             timer: TickTimer::new(),
-            debug_tag: mac_seed,
         }
     }
 
@@ -229,12 +226,6 @@ impl Switch {
     /// Returns the root port of the switch.
     pub fn root_port(&self) -> Option<usize> {
         self.root_port
-    }
-
-    /// A tag that will appear in the debugger to help identify the switch.
-    #[cfg(test)]
-    pub(crate) fn set_debug_tag(&mut self, tag: u8) {
-        self.debug_tag = tag;
     }
 
     /// Returns all ports in the designated role.

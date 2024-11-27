@@ -6,6 +6,7 @@ mod network {
 
     pub mod device {
         pub mod cable;
+        pub mod desktop;
         pub mod router;
         pub mod switch;
     }

@@ -461,9 +461,6 @@ fn complete_network() -> (
     let mut s1 = Switch::from_seed(1, 1);
     let mut s2 = Switch::from_seed(33, 2);
     let mut s3 = Switch::from_seed(65, 3);
-    s1.set_debug_tag(1);
-    s2.set_debug_tag(2);
-    s3.set_debug_tag(3);
 
     let mut i1 = EthernetInterface::new(mac_addr!(100));
     let mut i2 = EthernetInterface::new(mac_addr!(200));
