@@ -180,10 +180,14 @@ impl DesktopEntity {
             match ds.selection {
                 // Ethernet0/1
                 0 => {
-                    if s.connect_d1.is_none() {
-                        s.connect_d1 = Some(self.id);
-                    } else {
-                        s.connect_d2 = Some(self.id);
+                    if s.remove_mode {
+                        s.remove_d = Some(self.id);
+                    } else if s.connect_mode {
+                        if s.connect_d1.is_none() {
+                            s.connect_d1 = Some(self.id);
+                        } else {
+                            s.connect_d2 = Some(self.id);
+                        }
                     }
                     close(ds, s);
                 }
@@ -276,7 +280,53 @@ fn handle_sim_clicked(
     let left_mouse_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
     let left_mouse_release = rl.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
 
-    // Connect mode
+    // GUI Controls
+    // ------------------------------------------------------
+    if left_mouse_clicked {
+        if s.menu_selected == 0 {
+            if ETHERNET_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                s.connect_mode = true;
+                return;
+            } else if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                s.remove_mode = true;
+                return;
+            }
+        } else if s.menu_selected == 1 {
+        }
+    }
+    // ------------------------------------------------------
+
+    // Sim Controls
+    // ------------------------------------------------------
+    if s.remove_mode {
+        if left_mouse_clicked {
+            if mouse_collision.is_none() {
+                s.remove_mode = false;
+                s.remove_d = None;
+                return;
+            }
+
+            if s.remove_d.is_none() {
+                let (i, entity) = mouse_collision.unwrap();
+                s.dropdown_device = Some(entity.id);
+                s.sim_lock = true;
+                devices[i].open_connections(mouse_pos);
+                return;
+            }
+        }
+
+        if s.remove_d.is_none() {
+            return;
+        }
+
+        let id = s.remove_d.unwrap();
+        let (i, _) = get_entity(id, devices);
+        DesktopEntity::disconnect(i, devices);
+        s.remove_mode = false;
+        s.remove_d = None;
+        return;
+    }
+
     if s.connect_mode {
         if left_mouse_clicked {
             if mouse_collision.is_none() && s.connect_d1.is_some() {
@@ -362,6 +412,7 @@ fn handle_sim_clicked(
             s.drag_origin = mouse_pos - entity.pos;
         }
     }
+    // ------------------------------------------------------
 }
 
 fn draw_connections(d: &mut RaylibDrawHandle, devices: &Vec<DesktopEntity>) {
@@ -399,6 +450,13 @@ fn get_entity(id: EntityId, devices: &Vec<DesktopEntity>) -> (usize, &DesktopEnt
 
 const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 375.0, 800.0, 125.0);
 
+const ETHERNET_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
+const DISCONNECT_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
+
+const DESKTOP_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
+const SWITCH_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
+const ROUTER_SELBOX: Rectangle = Rectangle::new(293.0, 408.0, 70.0, 70.0);
+
 fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
         unsafe {
@@ -415,6 +473,27 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
                 },
             );
         };
+    }
+
+    let border_color = Color::get_color(d.gui_get_style(
+        GuiControl::STATUSBAR,
+        GuiControlProperty::BORDER_COLOR_DISABLED as i32,
+    ) as u32);
+
+    fn border_selection_color(d: &RaylibDrawHandle, rec: &Rectangle, fixed: bool) -> Color {
+        let color = Color::get_color(d.gui_get_style(
+            GuiControl::STATUSBAR,
+            GuiControlProperty::BORDER_COLOR_DISABLED as i32,
+        ) as u32);
+
+        if fixed || rec.check_collision_point_rec(d.get_mouse_position()) {
+            return Color::get_color(d.gui_get_style(
+                GuiControl::BUTTON,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+            ) as u32);
+        }
+
+        color
     }
 
     d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
@@ -447,10 +526,6 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     d.gui_set_state(ffi::GuiState::STATE_NORMAL);
 
     // Box for devices
-    let border_color = Color::get_color(d.gui_get_style(
-        GuiControl::STATUSBAR,
-        GuiControlProperty::BORDER_COLOR_DISABLED as i32,
-    ) as u32);
     d.draw_rectangle_v(
         Vector2::new(130.0, 398.0),
         Vector2::new(1.0, 101.0),
@@ -467,7 +542,20 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             Color::BLACK,
         );
         d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(137, 408, 70, 70, border_color);
+        d.draw_rectangle_lines_ex(
+            ETHERNET_SELBOX,
+            1.0,
+            border_selection_color(d, &ETHERNET_SELBOX, s.connect_mode),
+        );
+
+        // Disconnect
+        draw_icon(GuiIconName::ICON_CROSS, 225, 410, 3, Color::BLACK);
+        d.draw_text("Remove", 225, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines_ex(
+            DISCONNECT_SELBOX,
+            1.0,
+            border_selection_color(d, &DISCONNECT_SELBOX, s.remove_mode),
+        );
     }
 
     // Device types
@@ -475,7 +563,11 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
         // Desktop (rectangle)
         draw_icon(GuiIconName::ICON_MONITOR, 147, 410, 3, Color::BLACK);
         d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(137, 408, 70, 70, border_color);
+        d.draw_rectangle_lines_ex(
+            DESKTOP_SELBOX,
+            1.0,
+            border_selection_color(d, &DESKTOP_SELBOX, false),
+        );
 
         // Switch
         d.draw_rectangle_lines_ex(Rectangle::new(230.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
@@ -487,14 +579,22 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             Color::BLACK,
         );
         d.draw_text("Switch", 227, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(215, 408, 70, 70, border_color);
+        d.draw_rectangle_lines_ex(
+            SWITCH_SELBOX,
+            1.0,
+            border_selection_color(d, &SWITCH_SELBOX, false),
+        );
 
         // Router
         d.draw_circle(328, 435, 21.0, Color::BLACK);
         d.draw_circle(328, 435, 18.5, Color::RAYWHITE);
         draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 314, 420, 2, Color::BLACK);
         d.draw_text("Router", 305, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(293, 408, 70, 70, border_color);
+        d.draw_rectangle_lines_ex(
+            ROUTER_SELBOX,
+            1.0,
+            border_selection_color(d, &ROUTER_SELBOX, false),
+        );
     }
 
     d.draw_rectangle_v(
@@ -513,6 +613,9 @@ struct GuiState {
     drag_device: EntityId,
     drag_origin: Vector2,
 
+    remove_mode: bool,
+    remove_d: Option<EntityId>,
+
     connect_mode: bool,
     connect_d1: Option<EntityId>,
     connect_d2: Option<EntityId>,
@@ -529,6 +632,9 @@ impl Default for GuiState {
             drag_mode: false,
             drag_device: 0,
             drag_origin: Vector2::zero(),
+
+            remove_mode: false,
+            remove_d: None,
 
             connect_mode: false,
             connect_d1: None,
