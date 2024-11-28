@@ -9,6 +9,10 @@ use crate::network::device::{cable::CableSimulator, desktop::Desktop};
 
 type EntityId = u64;
 
+// TODO: When connect mode is active, can't exit it if no devices on screen.
+// TODO: Can select multiple modes at once, should be mutually exclusive.
+// TODO: GUI should lock during drag, connect, remove, etc.
+
 struct DropdownGuiState {
     open: bool,
     selection: i32,
@@ -180,15 +184,20 @@ impl DesktopEntity {
             match ds.selection {
                 // Ethernet0/1
                 0 => {
-                    if s.remove_mode {
-                        s.remove_d = Some(self.id);
-                    } else if s.connect_mode {
-                        if s.connect_d1.is_none() {
-                            s.connect_d1 = Some(self.id);
-                        } else {
-                            s.connect_d2 = Some(self.id);
+                    match s.mode {
+                        GuiMode::Connect => {
+                            if s.connect_d1.is_none() {
+                                s.connect_d1 = Some(self.id);
+                            } else {
+                                s.connect_d2 = Some(self.id);
+                            }
                         }
+                        GuiMode::Remove => {
+                            s.remove_d = Some(self.id);
+                        }
+                        _ => {}
                     }
+
                     close(ds, s);
                 }
                 _ => {}
@@ -256,7 +265,7 @@ impl DesktopEntity {
 
 fn handle_sim_clicked(
     s: &mut GuiState,
-    rl: &RaylibHandle,
+    rl: &mut RaylibHandle,
     devices: &mut Vec<DesktopEntity>,
     desktop_count: &mut u64,
     entity_seed: &mut EntityId,
@@ -281,105 +290,7 @@ fn handle_sim_clicked(
     let left_mouse_release = rl.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT);
 
     // GUI Controls
-    // ------------------------------------------------------
-    if left_mouse_clicked {
-        if s.menu_selected == 0 {
-            if ETHERNET_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                s.connect_mode = true;
-                return;
-            } else if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                s.remove_mode = true;
-                return;
-            }
-        } else if s.menu_selected == 1 {
-        }
-    }
-    // ------------------------------------------------------
-
-    // Sim Controls
-    // ------------------------------------------------------
-    if s.remove_mode {
-        if left_mouse_clicked {
-            if mouse_collision.is_none() {
-                s.remove_mode = false;
-                s.remove_d = None;
-                return;
-            }
-
-            if s.remove_d.is_none() {
-                let (i, entity) = mouse_collision.unwrap();
-                s.dropdown_device = Some(entity.id);
-                s.sim_lock = true;
-                devices[i].open_connections(mouse_pos);
-                return;
-            }
-        }
-
-        if s.remove_d.is_none() {
-            return;
-        }
-
-        let id = s.remove_d.unwrap();
-        let (i, _) = get_entity(id, devices);
-        DesktopEntity::disconnect(i, devices);
-        s.remove_mode = false;
-        s.remove_d = None;
-        return;
-    }
-
-    if s.connect_mode {
-        if left_mouse_clicked {
-            if mouse_collision.is_none() && s.connect_d1.is_some() {
-                s.connect_mode = false;
-                s.connect_d1 = None;
-                s.connect_d2 = None;
-                return;
-            }
-
-            if mouse_collision.is_none() {
-                return;
-            }
-
-            let (i, entity) = mouse_collision.unwrap();
-            s.dropdown_device = Some(entity.id);
-            s.sim_lock = true;
-            devices[i].open_connections(mouse_pos);
-            return;
-        }
-
-        if s.connect_d1.is_none() || s.connect_d2.is_none() {
-            return;
-        }
-
-        let d1 = s.connect_d1.unwrap();
-        let d2 = s.connect_d2.unwrap();
-        let (d1_i, _) = get_entity(d1, devices);
-        let (d2_i, _) = get_entity(d2, devices);
-        DesktopEntity::connect(d1_i, d2_i, devices);
-
-        s.connect_mode = false;
-        s.connect_d1 = None;
-        s.connect_d2 = None;
-        return;
-    }
-
-    if s.drag_mode {
-        if GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
-            s.drag_mode = false;
-            return;
-        }
-
-        if left_mouse_release {
-            s.drag_mode = false;
-        } else {
-            let (i, _) = get_entity(s.drag_device, devices);
-            let entity = &mut devices[i];
-
-            entity.pos = mouse_pos - s.drag_origin;
-        }
-        return;
-    }
-
+    //------------------------------------------------------
     if right_mouse_clicked {
         // Open a dropdown menu for a device if collision
         if let Some((i, entity)) = mouse_collision {
@@ -391,26 +302,136 @@ fn handle_sim_clicked(
     }
 
     if left_mouse_clicked {
-        // Create a new device if no collision
-        if mouse_collision.is_none() && !GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
-            devices.push(DesktopEntity::new(
-                *entity_seed,
-                mouse_pos,
-                format!("Desktop {}", *desktop_count),
-            ));
-            *entity_seed += 1;
-            *desktop_count += 1;
+        match s.menu_selected {
+            MenuKind::Connection => {
+                if ETHERNET_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                    s.mode = GuiMode::Connect;
+                    return;
+                } else if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                    s.mode = GuiMode::Remove;
+                    return;
+                }
+            }
+            MenuKind::Device => {
+                if DESKTOP_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                    s.mode = GuiMode::Place;
+                    s.place_type = Some(DeviceKind::Desktop);
+                    return;
+                } else if SWITCH_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                    s.mode = GuiMode::Place;
+                    s.place_type = Some(DeviceKind::Switch);
+                    return;
+                } else if ROUTER_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+                    s.mode = GuiMode::Place;
+                    s.place_type = Some(DeviceKind::Router);
+                    return;
+                }
+            }
         }
-        return;
     }
 
-    if left_mouse_down {
-        // Start dragging a device
-        if let Some((_, entity)) = mouse_collision {
-            s.drag_mode = true;
-            s.drag_device = entity.id;
-            s.drag_origin = mouse_pos - entity.pos;
+    // Sim Controls
+    //------------------------------------------------------
+    match s.mode {
+        GuiMode::Remove => {
+            if left_mouse_clicked {
+                if mouse_collision.is_none() {
+                    s.remove_d = None;
+                    return;
+                }
+
+                if s.remove_d.is_none() {
+                    let (i, entity) = mouse_collision.unwrap();
+                    s.dropdown_device = Some(entity.id);
+                    s.sim_lock = true;
+                    devices[i].open_connections(mouse_pos);
+                    return;
+                }
+            }
+
+            if s.remove_d.is_none() {
+                return;
+            }
+
+            let id = s.remove_d.unwrap();
+            let (i, _) = get_entity(id, devices);
+            DesktopEntity::disconnect(i, devices);
+            s.remove_d = None;
+            return;
         }
+        GuiMode::Connect => {
+            if left_mouse_clicked {
+                if mouse_collision.is_none() {
+                    s.connect_d1 = None;
+                    s.connect_d2 = None;
+                    return;
+                }
+
+                let (i, entity) = mouse_collision.unwrap();
+                s.dropdown_device = Some(entity.id);
+                s.sim_lock = true;
+                devices[i].open_connections(mouse_pos);
+                return;
+            }
+
+            if s.connect_d1.is_none() || s.connect_d2.is_none() {
+                return;
+            }
+
+            let d1 = s.connect_d1.unwrap();
+            let d2 = s.connect_d2.unwrap();
+            let (d1_i, _) = get_entity(d1, devices);
+            let (d2_i, _) = get_entity(d2, devices);
+            DesktopEntity::connect(d1_i, d2_i, devices);
+
+            s.connect_d1 = None;
+            s.connect_d2 = None;
+            return;
+        }
+        GuiMode::Drag => {
+            if GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
+                s.mode = GuiMode::Place;
+                rl.gui_unlock();
+                return;
+            }
+
+            if left_mouse_release {
+                s.mode = GuiMode::Place;
+                rl.gui_unlock();
+                return;
+            }
+            let (i, _) = get_entity(s.drag_device, devices);
+            let entity = &mut devices[i];
+
+            entity.pos = mouse_pos - s.drag_origin;
+            return;
+        }
+        GuiMode::Place => {
+            if left_mouse_clicked
+                && mouse_collision.is_none()
+                && !GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos)
+            {
+                devices.push(DesktopEntity::new(
+                    *entity_seed,
+                    mouse_pos,
+                    format!("Desktop {}", *desktop_count),
+                ));
+                *entity_seed += 1;
+                *desktop_count += 1;
+                return;
+            }
+
+            if left_mouse_down {
+                if let Some((_, entity)) = mouse_collision {
+                    s.mode = GuiMode::Drag;
+                    rl.gui_lock();
+                    s.drag_device = entity.id;
+                    s.drag_origin = mouse_pos - entity.pos;
+                }
+                return;
+            }
+        }
+        GuiMode::Select => {}
     }
     // ------------------------------------------------------
 }
@@ -498,7 +519,9 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
 
     d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
 
-    if s.menu_selected == 0 {
+    // Connection Type Button
+    //----------------------------------------------
+    if s.menu_selected == MenuKind::Connection {
         d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
     }
 
@@ -506,120 +529,170 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
         Rectangle::new(15.0, 415.0, 100.0, 30.0),
         Some(rstr!("Connection Types")),
     ) {
-        s.menu_selected = 0;
+        s.menu_selected = MenuKind::Connection;
     }
 
-    d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    if s.menu_selected == MenuKind::Connection {
+        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    }
+    //------------------------------------------------
 
-    if s.menu_selected == 1 {
+    // Device Type Button
+    //------------------------------------------------
+    if s.menu_selected == MenuKind::Device {
         d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
     }
 
-    // Device type button
     if d.gui_button(
         Rectangle::new(15.0, 455.0, 100.0, 30.0),
         Some(rstr!("Device Types")),
     ) {
-        s.menu_selected = 1;
+        s.menu_selected = MenuKind::Device;
     }
 
-    d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    if s.menu_selected == MenuKind::Device {
+        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    }
+    //------------------------------------------------
 
     // Box for devices
+    //----------------------------------------------
     d.draw_rectangle_v(
         Vector2::new(130.0, 398.0),
         Vector2::new(1.0, 101.0),
         border_color,
     );
 
-    // Connection types
-    if s.menu_selected == 0 {
-        // Ethernet
-        d.draw_line_ex(
-            Vector2::new(145.0, 450.0),
-            Vector2::new(200.0, 420.0),
-            2.0,
-            Color::BLACK,
-        );
-        d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines_ex(
-            ETHERNET_SELBOX,
-            1.0,
-            border_selection_color(d, &ETHERNET_SELBOX, s.connect_mode),
-        );
-
-        // Disconnect
-        draw_icon(GuiIconName::ICON_CROSS, 225, 410, 3, Color::BLACK);
-        d.draw_text("Remove", 225, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines_ex(
-            DISCONNECT_SELBOX,
-            1.0,
-            border_selection_color(d, &DISCONNECT_SELBOX, s.remove_mode),
-        );
-    }
-
-    // Device types
-    if s.menu_selected == 1 {
-        // Desktop (rectangle)
-        draw_icon(GuiIconName::ICON_MONITOR, 147, 410, 3, Color::BLACK);
-        d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines_ex(
-            DESKTOP_SELBOX,
-            1.0,
-            border_selection_color(d, &DESKTOP_SELBOX, false),
-        );
-
-        // Switch
-        d.draw_rectangle_lines_ex(Rectangle::new(230.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
-        draw_icon(
-            GuiIconName::ICON_CURSOR_SCALE_FILL,
-            233,
-            418,
-            2,
-            Color::BLACK,
-        );
-        d.draw_text("Switch", 227, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines_ex(
-            SWITCH_SELBOX,
-            1.0,
-            border_selection_color(d, &SWITCH_SELBOX, false),
-        );
-
-        // Router
-        d.draw_circle(328, 435, 21.0, Color::BLACK);
-        d.draw_circle(328, 435, 18.5, Color::RAYWHITE);
-        draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 314, 420, 2, Color::BLACK);
-        d.draw_text("Router", 305, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines_ex(
-            ROUTER_SELBOX,
-            1.0,
-            border_selection_color(d, &ROUTER_SELBOX, false),
-        );
-    }
-
     d.draw_rectangle_v(
         Vector2::new(370.0, 398.0),
         Vector2::new(1.0, 101.0),
         border_color,
     );
+    //----------------------------------------------
+
+    // Menu Options
+    //----------------------------------------------
+    match s.menu_selected {
+        MenuKind::Connection => {
+            // Ethernet
+            d.draw_line_ex(
+                Vector2::new(145.0, 450.0),
+                Vector2::new(200.0, 420.0),
+                2.0,
+                Color::BLACK,
+            );
+            d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
+            d.draw_rectangle_lines_ex(
+                ETHERNET_SELBOX,
+                1.0,
+                border_selection_color(d, &ETHERNET_SELBOX, s.mode == GuiMode::Connect),
+            );
+
+            // Disconnect
+            draw_icon(GuiIconName::ICON_CROSS, 225, 410, 3, Color::BLACK);
+            d.draw_text("Remove", 225, 455, 15, Color::BLACK);
+            d.draw_rectangle_lines_ex(
+                DISCONNECT_SELBOX,
+                1.0,
+                border_selection_color(d, &DISCONNECT_SELBOX, s.mode == GuiMode::Remove),
+            );
+        }
+        MenuKind::Device => {
+            let mode = s.mode == GuiMode::Place || s.mode == GuiMode::Drag;
+
+            // Desktop (rectangle)
+            draw_icon(GuiIconName::ICON_MONITOR, 147, 410, 3, Color::BLACK);
+            d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
+            d.draw_rectangle_lines_ex(
+                DESKTOP_SELBOX,
+                1.0,
+                border_selection_color(
+                    d,
+                    &DESKTOP_SELBOX,
+                    s.place_type == Some(DeviceKind::Desktop) && mode,
+                ),
+            );
+
+            // Switch
+            d.draw_rectangle_lines_ex(Rectangle::new(230.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
+            draw_icon(
+                GuiIconName::ICON_CURSOR_SCALE_FILL,
+                233,
+                418,
+                2,
+                Color::BLACK,
+            );
+            d.draw_text("Switch", 227, 455, 15, Color::BLACK);
+            d.draw_rectangle_lines_ex(
+                SWITCH_SELBOX,
+                1.0,
+                border_selection_color(
+                    d,
+                    &SWITCH_SELBOX,
+                    s.place_type == Some(DeviceKind::Switch) && mode,
+                ),
+            );
+
+            // Router
+            d.draw_circle(328, 435, 21.0, Color::BLACK);
+            d.draw_circle(328, 435, 18.5, Color::RAYWHITE);
+            draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 314, 420, 2, Color::BLACK);
+            d.draw_text("Router", 305, 455, 15, Color::BLACK);
+            d.draw_rectangle_lines_ex(
+                ROUTER_SELBOX,
+                1.0,
+                border_selection_color(
+                    d,
+                    &ROUTER_SELBOX,
+                    s.place_type == Some(DeviceKind::Router) && mode,
+                ),
+            );
+        }
+    }
+    //----------------------------------------------
+}
+
+#[derive(PartialEq)]
+enum DeviceKind {
+    Desktop,
+    Switch,
+    Router,
+}
+
+#[derive(PartialEq)]
+enum MenuKind {
+    Connection,
+    Device,
+}
+
+#[derive(PartialEq)]
+enum GuiMode {
+    Place,
+    Drag,
+    Remove,
+    Connect,
+    Select,
 }
 
 struct GuiState {
     sim_lock: bool,
     tracer_lock: bool,
+
+    mode: GuiMode,
+
     dropdown_device: Option<EntityId>,
 
-    drag_mode: bool,
+    place_type: Option<DeviceKind>,
+
     drag_device: EntityId,
     drag_origin: Vector2,
 
-    remove_mode: bool,
     remove_d: Option<EntityId>,
 
-    connect_mode: bool,
     connect_d1: Option<EntityId>,
     connect_d2: Option<EntityId>,
-    menu_selected: i32,
+
+    menu_selected: MenuKind,
 }
 
 impl Default for GuiState {
@@ -627,19 +700,21 @@ impl Default for GuiState {
         Self {
             sim_lock: false,
             tracer_lock: false,
+
+            mode: GuiMode::Select,
+
             dropdown_device: None,
 
-            drag_mode: false,
+            place_type: None,
+
             drag_device: 0,
             drag_origin: Vector2::zero(),
 
-            remove_mode: false,
             remove_d: None,
 
-            connect_mode: false,
             connect_d1: None,
             connect_d2: None,
-            menu_selected: 1,
+            menu_selected: MenuKind::Device,
         }
     }
 }
@@ -667,7 +742,7 @@ pub fn run() {
         if !s.sim_lock {
             handle_sim_clicked(
                 &mut s,
-                &rl,
+                &mut rl,
                 &mut devices,
                 &mut desktop_count,
                 &mut entity_seed,
@@ -699,7 +774,7 @@ pub fn run() {
 
         draw_connections(&mut d, &devices);
 
-        if s.connect_mode && s.connect_d1.is_some() && s.connect_d2.is_none() {
+        if s.mode == GuiMode::Connect && s.connect_d1.is_some() && s.connect_d2.is_none() {
             last_connected_pos = if s.sim_lock {
                 last_connected_pos
             } else {
