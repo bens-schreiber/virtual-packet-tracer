@@ -13,6 +13,23 @@ type EntityId = u64;
 // TODO: Can select multiple modes at once, should be mutually exclusive.
 // TODO: GUI should lock during drag, connect, remove, etc.
 
+fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
+    unsafe {
+        ffi::GuiDrawIcon(
+            icon as i32,
+            pos_x,
+            pos_y,
+            pixel_size,
+            ffi::Color {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+                a: color.a,
+            },
+        );
+    };
+}
+
 struct DropdownGuiState {
     open: bool,
     selection: i32,
@@ -56,25 +73,23 @@ impl DesktopEntity {
         }
     }
 
-    fn render(&self, d: &mut RaylibDrawHandle) {
-        d.draw_rectangle(
-            (self.pos.x - 25.0) as i32,
-            (self.pos.y - 25.0) as i32,
-            50,
-            50,
-            Color::BLACK,
-        );
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(self.pos.x - 25.0, self.pos.y - 25.0, 50.0, 50.0)
+    }
 
-        d.draw_rectangle_lines_ex(
-            Rectangle::new(self.pos.x - 25.0, self.pos.y - 25.0, 50.0, 50.0),
-            2.0,
+    fn render(&self, d: &mut RaylibDrawHandle) {
+        draw_icon(
+            GuiIconName::ICON_MONITOR,
+            self.pos.x as i32 - 25,
+            self.pos.y as i32 - 25,
+            3,
             Color::WHITE,
         );
 
         d.draw_text(
             &self.label,
-            (self.pos.x - 25.0) as i32,
-            (self.pos.y + 30.0) as i32,
+            (self.pos.x - 32.0) as i32,
+            (self.pos.y + 25.0) as i32,
             15,
             Color::WHITE,
         );
@@ -254,8 +269,7 @@ impl DesktopEntity {
     }
 
     fn collides(&self, point: Vector2) -> bool {
-        Rectangle::new(self.pos.x - 25.0, self.pos.y - 25.0, 50.0, 50.0)
-            .check_collision_point_rec(point)
+        self.bounding_box().check_collision_point_rec(point)
     }
 
     fn tick(&mut self) {
@@ -328,6 +342,11 @@ fn handle_sim_clicked(
                 }
             }
         }
+
+        if SELECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Select;
+            return;
+        }
     }
 
     // Sim Controls
@@ -390,13 +409,13 @@ fn handle_sim_clicked(
         }
         GuiMode::Drag => {
             if GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
-                s.mode = GuiMode::Place;
+                s.mode = s.drag_prev_mode;
                 rl.gui_unlock();
                 return;
             }
 
             if left_mouse_release {
-                s.mode = GuiMode::Place;
+                s.mode = s.drag_prev_mode;
                 rl.gui_unlock();
                 return;
             }
@@ -424,6 +443,7 @@ fn handle_sim_clicked(
             if left_mouse_down {
                 if let Some((_, entity)) = mouse_collision {
                     s.mode = GuiMode::Drag;
+                    s.drag_prev_mode = GuiMode::Place;
                     rl.gui_lock();
                     s.drag_device = entity.id;
                     s.drag_origin = mouse_pos - entity.pos;
@@ -431,7 +451,18 @@ fn handle_sim_clicked(
                 return;
             }
         }
-        GuiMode::Select => {}
+        GuiMode::Select => {
+            if left_mouse_down {
+                if let Some((_, entity)) = mouse_collision {
+                    s.mode = GuiMode::Drag;
+                    s.drag_prev_mode = GuiMode::Select;
+                    rl.gui_lock();
+                    s.drag_device = entity.id;
+                    s.drag_origin = mouse_pos - entity.pos;
+                }
+                return;
+            }
+        }
     }
     // ------------------------------------------------------
 }
@@ -469,6 +500,8 @@ fn get_entity(id: EntityId, devices: &Vec<DesktopEntity>) -> (usize, &DesktopEnt
     (res, &devices[res])
 }
 
+const SCREEN_BOX: Rectangle = Rectangle::new(0.0, 0.0, 800.0, 500.0);
+
 const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 375.0, 800.0, 125.0);
 
 const ETHERNET_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
@@ -478,24 +511,14 @@ const DESKTOP_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
 const SWITCH_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
 const ROUTER_SELBOX: Rectangle = Rectangle::new(293.0, 408.0, 70.0, 70.0);
 
-fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
-    fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
-        unsafe {
-            ffi::GuiDrawIcon(
-                icon as i32,
-                pos_x,
-                pos_y,
-                pixel_size,
-                ffi::Color {
-                    r: color.r,
-                    g: color.g,
-                    b: color.b,
-                    a: color.a,
-                },
-            );
-        };
-    }
+const SELECT_SELBOX: Rectangle = Rectangle::new(
+    SCREEN_BOX.width - 45.0,
+    GUI_CONTROLS_PANEL.y - 45.0,
+    37.0,
+    37.0,
+);
 
+fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     let border_color = Color::get_color(d.gui_get_style(
         GuiControl::STATUSBAR,
         GuiControlProperty::BORDER_COLOR_DISABLED as i32,
@@ -568,6 +591,36 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
         Vector2::new(1.0, 101.0),
         border_color,
     );
+    //----------------------------------------------
+
+    // Select Mode Button
+    //----------------------------------------------
+    if s.mode == GuiMode::Select {
+        d.gui_set_state(ffi::GuiState::STATE_PRESSED);
+    }
+
+    d.draw_rectangle_rec(SELECT_SELBOX, Color::RAYWHITE);
+    d.draw_rectangle_lines_ex(
+        SELECT_SELBOX,
+        1.0,
+        border_selection_color(
+            d,
+            &SELECT_SELBOX,
+            s.mode == GuiMode::Select
+                || s.mode == GuiMode::Drag && s.drag_prev_mode == GuiMode::Select,
+        ),
+    );
+    draw_icon(
+        GuiIconName::ICON_CURSOR_MOVE,
+        SELECT_SELBOX.x.trunc() as i32 + 2,
+        SELECT_SELBOX.y.trunc() as i32 + 1,
+        2,
+        Color::BLACK,
+    );
+
+    if s.mode == GuiMode::Select {
+        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    }
     //----------------------------------------------
 
     // Menu Options
@@ -665,7 +718,7 @@ enum MenuKind {
     Device,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum GuiMode {
     Place,
     Drag,
@@ -684,6 +737,7 @@ struct GuiState {
 
     place_type: Option<DeviceKind>,
 
+    drag_prev_mode: GuiMode,
     drag_device: EntityId,
     drag_origin: Vector2,
 
@@ -707,6 +761,7 @@ impl Default for GuiState {
 
             place_type: None,
 
+            drag_prev_mode: GuiMode::Select,
             drag_device: 0,
             drag_origin: Vector2::zero(),
 
