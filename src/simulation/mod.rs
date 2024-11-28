@@ -264,7 +264,7 @@ fn handle_sim_clicked(
         let mut res = None;
         for (i, device) in devices.iter().rev().enumerate() {
             if device.collides(mouse_pos) {
-                res = Some((i, device));
+                res = Some((devices.len() - 1 - i, device));
                 break;
             }
         }
@@ -507,7 +507,6 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
 struct GuiState {
     sim_lock: bool,
     tracer_lock: bool,
-
     dropdown_device: Option<EntityId>,
 
     drag_mode: bool,
@@ -517,7 +516,6 @@ struct GuiState {
     connect_mode: bool,
     connect_d1: Option<EntityId>,
     connect_d2: Option<EntityId>,
-
     menu_selected: i32,
 }
 
@@ -526,7 +524,6 @@ impl Default for GuiState {
         Self {
             sim_lock: false,
             tracer_lock: false,
-
             dropdown_device: None,
 
             drag_mode: false,
@@ -536,7 +533,6 @@ impl Default for GuiState {
             connect_mode: false,
             connect_d1: None,
             connect_d2: None,
-
             menu_selected: 1,
         }
     }
@@ -562,7 +558,7 @@ pub fn run() {
     let mut s = GuiState::default();
 
     while !rl.window_should_close() {
-        if !s.sim_lock && !s.tracer_lock {
+        if !s.sim_lock {
             handle_sim_clicked(
                 &mut s,
                 &rl,
@@ -576,24 +572,22 @@ pub fn run() {
             devices[i].handle_gui_clicked(&mut rl, &mut s);
         }
 
-        if !s.tracer_lock {
-            cable_sim.tick();
+        cable_sim.tick();
 
-            for (i, device) in devices.iter_mut().enumerate() {
-                if device.deleted {
-                    deleted_devices.push(i);
-                    continue;
-                }
-                device.tick();
+        for (i, device) in devices.iter_mut().enumerate() {
+            if device.deleted {
+                deleted_devices.push(i);
+                continue;
             }
-
-            // Lazy delete devices
-            for i in deleted_devices.iter().rev() {
-                DesktopEntity::disconnect(*i, &mut devices);
-                devices.remove(*i);
-            }
-            deleted_devices.clear();
+            device.tick();
         }
+
+        // Lazy delete devices
+        for i in deleted_devices.iter().rev() {
+            DesktopEntity::disconnect(*i, &mut devices);
+            devices.remove(*i);
+        }
+        deleted_devices.clear();
 
         let mut d = rl.begin_drawing(&thread);
 
