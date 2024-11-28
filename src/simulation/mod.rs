@@ -102,7 +102,7 @@ impl DesktopEntity {
 
             let mut _scroll_index = 0;
 
-            let out = d.gui_list_view(
+            d.gui_list_view(
                 Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5),
                 Some(rstr!("Delete")),
                 &mut _scroll_index,
@@ -262,7 +262,7 @@ fn handle_sim_clicked(
     // todo: don't need to check this every frame, some lazy eval would be nice
     let mouse_collision: Option<(usize, &DesktopEntity)> = {
         let mut res = None;
-        for (i, device) in devices.iter().enumerate() {
+        for (i, device) in devices.iter().rev().enumerate() {
             if device.collides(mouse_pos) {
                 res = Some((i, device));
                 break;
@@ -398,22 +398,116 @@ fn get_entity(id: EntityId, devices: &Vec<DesktopEntity>) -> (usize, &DesktopEnt
     (res, &devices[res])
 }
 
-const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 400.0, 800.0, 150.0);
+const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 375.0, 800.0, 125.0);
 
 fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
+    fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
+        unsafe {
+            ffi::GuiDrawIcon(
+                icon as i32,
+                pos_x,
+                pos_y,
+                pixel_size,
+                ffi::Color {
+                    r: color.r,
+                    g: color.g,
+                    b: color.b,
+                    a: color.a,
+                },
+            );
+        };
+    }
+
     d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
 
-    // Connection mode button
-    if d.gui_button(
-        Rectangle::new(10.0, 430.0, 100.0, 30.0),
-        Some(rstr!("Ethernet")),
-    ) {
-        s.connect_mode = !s.connect_mode;
+    if s.menu_selected == 0 {
+        d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
     }
+
+    if d.gui_button(
+        Rectangle::new(15.0, 415.0, 100.0, 30.0),
+        Some(rstr!("Connection Types")),
+    ) {
+        s.menu_selected = 0;
+    }
+
+    d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+
+    if s.menu_selected == 1 {
+        d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
+    }
+
+    // Device type button
+    if d.gui_button(
+        Rectangle::new(15.0, 455.0, 100.0, 30.0),
+        Some(rstr!("Device Types")),
+    ) {
+        s.menu_selected = 1;
+    }
+
+    d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+
+    // Box for devices
+    let border_color = Color::get_color(d.gui_get_style(
+        GuiControl::STATUSBAR,
+        GuiControlProperty::BORDER_COLOR_DISABLED as i32,
+    ) as u32);
+    d.draw_rectangle_v(
+        Vector2::new(130.0, 398.0),
+        Vector2::new(1.0, 101.0),
+        border_color,
+    );
+
+    // Connection types
+    if s.menu_selected == 0 {
+        // Ethernet
+        d.draw_line_ex(
+            Vector2::new(145.0, 450.0),
+            Vector2::new(200.0, 420.0),
+            2.0,
+            Color::BLACK,
+        );
+        d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(137, 408, 70, 70, border_color);
+    }
+
+    // Device types
+    if s.menu_selected == 1 {
+        // Desktop (rectangle)
+        draw_icon(GuiIconName::ICON_MONITOR, 143, 410, 3, Color::BLACK);
+        d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(137, 408, 70, 70, border_color);
+
+        // Switch
+        d.draw_rectangle_lines_ex(Rectangle::new(225.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
+        draw_icon(
+            GuiIconName::ICON_CURSOR_SCALE_FILL,
+            228,
+            418,
+            2,
+            Color::BLACK,
+        );
+        d.draw_text("Switch", 225, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(210, 408, 70, 70, border_color);
+
+        // Router
+        d.draw_circle(325, 435, 21.0, Color::BLACK);
+        d.draw_circle(325, 435, 18.5, Color::RAYWHITE);
+        draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 309, 420, 2, Color::BLACK);
+        d.draw_text("Router", 302, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(290, 408, 70, 70, border_color);
+    }
+
+    d.draw_rectangle_v(
+        Vector2::new(370.0, 398.0),
+        Vector2::new(1.0, 101.0),
+        border_color,
+    );
 }
 
 struct GuiState {
     sim_lock: bool,
+    tracer_lock: bool,
 
     dropdown_device: Option<EntityId>,
 
@@ -424,12 +518,15 @@ struct GuiState {
     connect_mode: bool,
     connect_d1: Option<EntityId>,
     connect_d2: Option<EntityId>,
+
+    menu_selected: i32,
 }
 
 impl Default for GuiState {
     fn default() -> Self {
         Self {
             sim_lock: false,
+            tracer_lock: false,
 
             dropdown_device: None,
 
@@ -440,6 +537,8 @@ impl Default for GuiState {
             connect_mode: false,
             connect_d1: None,
             connect_d2: None,
+
+            menu_selected: 1,
         }
     }
 }
@@ -464,7 +563,7 @@ pub fn run() {
     let mut s = GuiState::default();
 
     while !rl.window_should_close() {
-        if !s.sim_lock {
+        if !s.sim_lock && !s.tracer_lock {
             handle_sim_clicked(
                 &mut s,
                 &rl,
@@ -478,22 +577,24 @@ pub fn run() {
             devices[i].handle_gui_clicked(&mut rl, &mut s);
         }
 
-        cable_sim.tick();
+        if !s.tracer_lock {
+            cable_sim.tick();
 
-        for (i, device) in devices.iter_mut().enumerate() {
-            if device.deleted {
-                deleted_devices.push(i);
-                continue;
+            for (i, device) in devices.iter_mut().enumerate() {
+                if device.deleted {
+                    deleted_devices.push(i);
+                    continue;
+                }
+                device.tick();
             }
-            device.tick();
-        }
 
-        // Lazy delete devices
-        for i in deleted_devices.iter().rev() {
-            DesktopEntity::disconnect(*i, &mut devices);
-            devices.remove(*i);
+            // Lazy delete devices
+            for i in deleted_devices.iter().rev() {
+                DesktopEntity::disconnect(*i, &mut devices);
+                devices.remove(*i);
+            }
+            deleted_devices.clear();
         }
-        deleted_devices.clear();
 
         let mut d = rl.begin_drawing(&thread);
 
