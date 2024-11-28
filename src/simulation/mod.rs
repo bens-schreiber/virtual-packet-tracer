@@ -333,7 +333,6 @@ fn handle_sim_clicked(
     if right_mouse_clicked {
         // Open a dropdown menu for a device if collision
         if let Some((i, entity)) = mouse_collision {
-            print!("Clicked device {}\n", entity.id);
             s.dropdown_device = Some(entity.id);
             s.sim_lock = true;
             devices[i].open_options(mouse_pos);
@@ -474,28 +473,28 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     // Device types
     if s.menu_selected == 1 {
         // Desktop (rectangle)
-        draw_icon(GuiIconName::ICON_MONITOR, 143, 410, 3, Color::BLACK);
+        draw_icon(GuiIconName::ICON_MONITOR, 147, 410, 3, Color::BLACK);
         d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
         d.draw_rectangle_lines(137, 408, 70, 70, border_color);
 
         // Switch
-        d.draw_rectangle_lines_ex(Rectangle::new(225.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
+        d.draw_rectangle_lines_ex(Rectangle::new(230.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
         draw_icon(
             GuiIconName::ICON_CURSOR_SCALE_FILL,
-            228,
+            233,
             418,
             2,
             Color::BLACK,
         );
-        d.draw_text("Switch", 225, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(210, 408, 70, 70, border_color);
+        d.draw_text("Switch", 227, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(215, 408, 70, 70, border_color);
 
         // Router
-        d.draw_circle(325, 435, 21.0, Color::BLACK);
-        d.draw_circle(325, 435, 18.5, Color::RAYWHITE);
-        draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 309, 420, 2, Color::BLACK);
-        d.draw_text("Router", 302, 455, 15, Color::BLACK);
-        d.draw_rectangle_lines(290, 408, 70, 70, border_color);
+        d.draw_circle(328, 435, 21.0, Color::BLACK);
+        d.draw_circle(328, 435, 18.5, Color::RAYWHITE);
+        draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 314, 420, 2, Color::BLACK);
+        d.draw_text("Router", 305, 455, 15, Color::BLACK);
+        d.draw_rectangle_lines(293, 408, 70, 70, border_color);
     }
 
     d.draw_rectangle_v(
