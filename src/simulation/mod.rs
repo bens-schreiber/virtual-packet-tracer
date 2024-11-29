@@ -1,6 +1,6 @@
 pub mod tick;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use raylib::prelude::*;
 use tick::Tickable;
@@ -8,10 +8,6 @@ use tick::Tickable;
 use crate::network::device::{cable::CableSimulator, desktop::Desktop};
 
 type EntityId = u64;
-
-// TODO: When connect mode is active, can't exit it if no devices on screen.
-// TODO: Can select multiple modes at once, should be mutually exclusive.
-// TODO: GUI should lock during drag, connect, remove, etc.
 
 fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
     unsafe {
@@ -30,6 +26,16 @@ fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: 
     };
 }
 
+fn rstr_from_string(s: String) -> std::ffi::CString {
+    std::ffi::CString::new(s).expect("CString::new failed")
+}
+
+fn array_to_string(array: &[u8; 255]) -> String {
+    let end = array.iter().position(|&c| c == 0).unwrap_or(array.len());
+    let slice = &array[..end];
+    String::from_utf8_lossy(slice).to_string()
+}
+
 struct DropdownGuiState {
     open: bool,
     selection: i32,
@@ -46,6 +52,53 @@ impl Default for DropdownGuiState {
     }
 }
 
+struct DisplayGuiState {
+    open: bool,
+    pos: Vector2,
+
+    ip_buffer: [u8; 15],
+    ip_edit_mode: bool,
+
+    subnet_buffer: [u8; 15],
+    subnet_edit_mode: bool,
+
+    cmd_line_buffer: [u8; 0xFF],
+    cmd_line_edit_mode: bool,
+    cmd_line_out: VecDeque<String>,
+}
+
+impl DisplayGuiState {
+    fn new(ip_address: [u8; 4], subnet_mask: [u8; 4]) -> Self {
+        let mut ip_buffer = [0u8; 15];
+        let ip_string = format!(
+            "{}.{}.{}.{}",
+            ip_address[0], ip_address[1], ip_address[2], ip_address[3]
+        );
+        let ip_bytes = ip_string.as_bytes();
+        ip_buffer[..ip_bytes.len()].copy_from_slice(ip_bytes);
+
+        let mut subnet_buffer = [0u8; 15];
+        let subnet_string = format!(
+            "{}.{}.{}.{}",
+            subnet_mask[0], subnet_mask[1], subnet_mask[2], subnet_mask[3]
+        );
+        let subnet_bytes = subnet_string.as_bytes();
+        subnet_buffer[..subnet_bytes.len()].copy_from_slice(subnet_bytes);
+
+        Self {
+            open: false,
+            pos: Vector2::zero(),
+            ip_buffer,
+            ip_edit_mode: false,
+            subnet_buffer,
+            subnet_edit_mode: false,
+            cmd_line_buffer: [0u8; 0xFF],
+            cmd_line_edit_mode: false,
+            cmd_line_out: VecDeque::new(),
+        }
+    }
+}
+
 struct DesktopEntity {
     id: EntityId,
     pos: Vector2,
@@ -56,19 +109,25 @@ struct DesktopEntity {
     options_gui: DropdownGuiState,
     connection_gui: DropdownGuiState,
 
+    display_gui: DisplayGuiState,
+
     deleted: bool,
 }
 
 impl DesktopEntity {
     fn new(id: EntityId, pos: Vector2, label: String) -> Self {
+        let desktop = Desktop::from_seed(id);
+        let ip = desktop.interface.ip_address;
+        let subnet = desktop.interface.subnet_mask;
         Self {
             id,
             pos,
-            desktop: Desktop::from_seed(id),
+            desktop,
             label,
             adj_list: vec![],
             options_gui: DropdownGuiState::default(),
             connection_gui: DropdownGuiState::default(),
+            display_gui: DisplayGuiState::new(ip, subnet),
             deleted: false,
         }
     }
@@ -112,7 +171,7 @@ impl DesktopEntity {
     }
 
     /// Returns true if some poppable state is open
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle) {
+    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
         let mut render_options = |d: &mut RaylibDrawHandle| {
             let ds = &mut self.options_gui;
             if !ds.open {
@@ -122,8 +181,8 @@ impl DesktopEntity {
             let mut _scroll_index = 0;
 
             d.gui_list_view(
-                Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5),
-                Some(rstr!("Delete")),
+                Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0),
+                Some(rstr!("Options;Delete")),
                 &mut _scroll_index,
                 &mut ds.selection,
             );
@@ -145,25 +204,143 @@ impl DesktopEntity {
             );
         };
 
+        let mut render_display = |d: &mut RaylibDrawHandle, s: &mut GuiState| {
+            let ds = &mut self.display_gui;
+            if !ds.open {
+                return;
+            }
+
+            if d.gui_window_box(
+                Rectangle::new(self.pos.x, self.pos.y, 300.0, 250.0),
+                Some(rstr_from_string(self.label.clone()).as_c_str()),
+            ) {
+                ds.open = false;
+                s.open_windows.retain(|(id, _)| *id != self.id);
+            }
+
+            // Configure IP
+            //----------------------------------------------
+            d.gui_label(
+                Rectangle::new(self.pos.x + 10.0, self.pos.y + 30.0, 100.0, 20.0),
+                Some(rstr!("IP Address")),
+            );
+
+            if d.gui_text_box(
+                Rectangle::new(self.pos.x + 120.0, self.pos.y + 30.0, 150.0, 20.0),
+                &mut ds.ip_buffer,
+                ds.ip_edit_mode,
+            ) {
+                ds.ip_edit_mode = !ds.ip_edit_mode;
+            }
+            //----------------------------------------------
+
+            // Configure Subnet Mask
+            //----------------------------------------------
+            d.gui_label(
+                Rectangle::new(self.pos.x + 10.0, self.pos.y + 60.0, 100.0, 20.0),
+                Some(rstr!("Subnet Mask")),
+            );
+
+            if d.gui_text_box(
+                Rectangle::new(self.pos.x + 120.0, self.pos.y + 60.0, 150.0, 20.0),
+                &mut ds.subnet_buffer,
+                ds.subnet_edit_mode,
+            ) {
+                ds.subnet_edit_mode = !ds.subnet_edit_mode;
+            }
+            //----------------------------------------------
+
+            // Command Line
+            //----------------------------------------------
+            d.draw_rectangle_rec(
+                Rectangle::new(self.pos.x + 10.0, self.pos.y + 90.0, 280.0, 100.0),
+                Color::BLACK,
+            );
+
+            // Output
+            let mut y = self.pos.y + 160.0;
+            for line in ds.cmd_line_out.iter().rev() {
+                d.draw_text(line, self.pos.x as i32 + 15, y as i32, 10, Color::WHITE);
+                y -= 15.0;
+                if y < self.pos.y + 90.0 {
+                    break;
+                }
+            }
+
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
+                Color::WHITE.color_to_int(),
+            );
+            d.draw_text(
+                "Desktop %",
+                self.pos.x as i32 + 15,
+                self.pos.y.trunc() as i32 + 175,
+                10,
+                Color::WHITE,
+            );
+            if d.gui_text_box(
+                Rectangle::new(self.pos.x + 71.0, self.pos.y + 170.0, 210.0, 20.0),
+                &mut ds.cmd_line_buffer,
+                true,
+            ) {
+                if d.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                    ds.cmd_line_out.push_back(format!(
+                        "Desktop % {}",
+                        array_to_string(&ds.cmd_line_buffer)
+                    ));
+
+                    if ds.cmd_line_out.len() > 8 {
+                        ds.cmd_line_out.pop_front();
+                    }
+
+                    ds.cmd_line_buffer = [0u8; 0xFF];
+                } else {
+                    ds.cmd_line_edit_mode = !ds.cmd_line_edit_mode;
+                }
+            }
+            d.gui_load_style_default();
+            //----------------------------------------------
+        };
+
+        render_display(d, s);
         render_options(d);
         render_connections(d);
     }
 
     fn handle_gui_clicked(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) {
-        fn close(ds: &mut DropdownGuiState, s: &mut GuiState) {
+        fn close_dropdown(ds: &mut DropdownGuiState, s: &mut GuiState) {
             ds.open = false;
             ds.selection = -1;
             s.sim_lock = false;
         }
 
-        fn dismiss(ds: &mut DropdownGuiState, s: &mut GuiState, rl: &RaylibHandle) {
+        fn dismiss_dropdown(
+            ds: &mut DropdownGuiState,
+            s: &mut GuiState,
+            rl: &RaylibHandle,
+            bounds: Rectangle,
+        ) {
             if ds.selection == -1 && ds.open {
                 if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
                     let mouse_pos = rl.get_mouse_position();
-                    if !Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5)
-                        .check_collision_point_rec(mouse_pos)
-                    {
-                        close(ds, s);
+                    if !bounds.check_collision_point_rec(mouse_pos) {
+                        close_dropdown(ds, s);
                     }
                 }
             }
@@ -177,16 +354,26 @@ impl DesktopEntity {
 
             // Handle dropdown clicked
             match ds.selection {
-                // Delete
+                // Options
                 0 => {
-                    close(ds, s);
+                    self.display_gui.open = true;
+                    s.open_windows.push((
+                        self.id,
+                        Rectangle::new(self.pos.x, self.pos.y, 300.0, 300.0),
+                    ));
+                    close_dropdown(ds, s);
+                }
+                // Delete
+                1 => {
                     self.deleted = true;
+                    close_dropdown(ds, s);
+                    print!("Deleted device {}", self.id);
                 }
                 _ => {}
             }
 
             // Dismiss dropdown menu
-            dismiss(ds, s, rl);
+            dismiss_dropdown(ds, s, rl, Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0));
         };
 
         let mut handle_connections = |rl: &mut RaylibHandle, s: &mut GuiState| {
@@ -213,13 +400,13 @@ impl DesktopEntity {
                         _ => {}
                     }
 
-                    close(ds, s);
+                    close_dropdown(ds, s);
                 }
                 _ => {}
             }
 
             // Dismiss dropdown menu
-            dismiss(ds, s, rl);
+            dismiss_dropdown(ds, s, rl, Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5));
         };
 
         handle_options(rl, s);
@@ -285,6 +472,14 @@ fn handle_sim_clicked(
     entity_seed: &mut EntityId,
 ) {
     let mouse_pos = rl.get_mouse_position();
+
+    // If we are clicking on a window, the sim shouldn't do anything
+    if s.open_windows
+        .iter()
+        .any(|(_, rec)| rec.check_collision_point_rec(mouse_pos))
+    {
+        return;
+    }
 
     // todo: don't need to check this every frame, some lazy eval would be nice
     let mouse_collision: Option<(usize, &DesktopEntity)> = {
@@ -602,7 +797,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     d.draw_rectangle_rec(SELECT_SELBOX, Color::RAYWHITE);
     d.draw_rectangle_lines_ex(
         SELECT_SELBOX,
-        1.0,
+        1.5,
         border_selection_color(
             d,
             &SELECT_SELBOX,
@@ -637,7 +832,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
             d.draw_rectangle_lines_ex(
                 ETHERNET_SELBOX,
-                1.0,
+                1.5,
                 border_selection_color(d, &ETHERNET_SELBOX, s.mode == GuiMode::Connect),
             );
 
@@ -646,7 +841,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             d.draw_text("Remove", 225, 455, 15, Color::BLACK);
             d.draw_rectangle_lines_ex(
                 DISCONNECT_SELBOX,
-                1.0,
+                1.5,
                 border_selection_color(d, &DISCONNECT_SELBOX, s.mode == GuiMode::Remove),
             );
         }
@@ -658,7 +853,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
             d.draw_rectangle_lines_ex(
                 DESKTOP_SELBOX,
-                1.0,
+                1.5,
                 border_selection_color(
                     d,
                     &DESKTOP_SELBOX,
@@ -678,7 +873,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             d.draw_text("Switch", 227, 455, 15, Color::BLACK);
             d.draw_rectangle_lines_ex(
                 SWITCH_SELBOX,
-                1.0,
+                1.5,
                 border_selection_color(
                     d,
                     &SWITCH_SELBOX,
@@ -693,7 +888,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             d.draw_text("Router", 305, 455, 15, Color::BLACK);
             d.draw_rectangle_lines_ex(
                 ROUTER_SELBOX,
-                1.0,
+                1.5,
                 border_selection_color(
                     d,
                     &ROUTER_SELBOX,
@@ -705,7 +900,7 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     //----------------------------------------------
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum DeviceKind {
     Desktop,
     Switch,
@@ -729,11 +924,12 @@ enum GuiMode {
 
 struct GuiState {
     sim_lock: bool,
-    tracer_lock: bool,
 
     mode: GuiMode,
 
     dropdown_device: Option<EntityId>,
+
+    open_windows: Vec<(EntityId, Rectangle)>,
 
     place_type: Option<DeviceKind>,
 
@@ -753,11 +949,12 @@ impl Default for GuiState {
     fn default() -> Self {
         Self {
             sim_lock: false,
-            tracer_lock: false,
 
             mode: GuiMode::Select,
 
             dropdown_device: None,
+
+            open_windows: vec![],
 
             place_type: None,
 
@@ -850,8 +1047,29 @@ pub fn run() {
             device.render(&mut d);
         }
 
+        match s.mode {
+            GuiMode::Place => {
+                if let Some(kind) = s.place_type {
+                    let icon = match kind {
+                        DeviceKind::Desktop => GuiIconName::ICON_MONITOR,
+                        DeviceKind::Switch => GuiIconName::ICON_CURSOR_SCALE_FILL,
+                        DeviceKind::Router => GuiIconName::ICON_SHUFFLE_FILL,
+                    };
+
+                    draw_icon(
+                        icon,
+                        d.get_mouse_x() + 15,
+                        d.get_mouse_y() + 15,
+                        1,
+                        Color::WHITE,
+                    );
+                }
+            }
+            _ => {}
+        }
+
         for device in devices.iter_mut() {
-            device.render_gui(&mut d);
+            device.render_gui(&mut d, &mut s);
         }
 
         draw_controls_panel(&mut d, &mut s);
