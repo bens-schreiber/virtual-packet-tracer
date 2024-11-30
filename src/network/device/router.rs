@@ -4,7 +4,7 @@ use crate::{
     is_ipv4_multicast_or_broadcast, mac_addr,
     network::{
         ethernet::{ByteSerialize, MacAddress},
-        ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Address},
+        ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Address},
     },
     network_address,
     simulation::tick::{TickTimer, Tickable},
@@ -147,16 +147,15 @@ impl Router {
                         Some(route.ip_address),
                         frame.ttl - 1,
                         frame.data,
+                        frame.protocol == 1,
                     );
 
                     continue;
                 }
 
-                // ICMP Destination Unreachable
-                let destination_unreachable = IcmpFrame::destination_unreachable(0, vec![]);
                 rp.interface
                     .borrow_mut()
-                    .send(frame.source, destination_unreachable.to_bytes());
+                    .send_icmp(frame.source, IcmpType::Unreachable);
             }
         }
     }

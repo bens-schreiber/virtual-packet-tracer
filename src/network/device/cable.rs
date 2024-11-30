@@ -113,7 +113,6 @@ impl EthernetPort {
     /// Appends the data the incoming buffer.
     /// * `data` - The data to append to the outgoing buffer and incoming buffer.
     pub fn send_to_self(&mut self, data: Vec<u8>) {
-        self.send(data.clone());
         self.incoming_buffer.push(data);
     }
 
@@ -127,7 +126,6 @@ impl EthernetPort {
     pub fn consume_incoming(&mut self) -> Vec<Vec<u8>> {
         let mut incoming = vec![];
         incoming.append(&mut self.incoming_buffer);
-
         incoming
     }
 

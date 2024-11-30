@@ -6,7 +6,7 @@ use crate::{
 
 pub struct Desktop {
     pub interface: Ipv4Interface,
-    received: Vec<Ipv4Frame>,
+    pub received: Vec<Ipv4Frame>,
 }
 
 impl Desktop {

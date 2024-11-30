@@ -43,7 +43,13 @@ fn same_subnet_filled_arp_tables() -> (CableSimulator, Ipv4Interface, Ipv4Interf
 fn Ipv4_EncapsulateIcmpFrame_GetOriginalFrameAfterSerialization() {
     // Arrange
     let frame = IcmpFrame::echo_request(0, 0, vec![1, 2, 3]);
-    let ipv4_frame = Ipv4Frame::new([192, 168, 1, 1], [192, 168, 1, 2], 64, frame.to_bytes());
+    let ipv4_frame = Ipv4Frame::new(
+        [192, 168, 1, 1],
+        [192, 168, 1, 2],
+        64,
+        frame.to_bytes(),
+        false,
+    );
 
     // Act
     let serialized = ipv4_frame.to_bytes();
@@ -174,7 +180,7 @@ fn Send_SameSubnet_ReceivesIpv4Frame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1))
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1), false)
     );
 }
 
@@ -209,7 +215,7 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1))
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 64, eth2_data!(1), false)
     );
 }
 
@@ -338,7 +344,7 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
     i1.connect(&mut i2);
 
     // Act
-    i1.ping(i2.ip_address);
+    i1.send_icmp(i2.ip_address, IcmpType::EchoRequest);
     sim.transmit();
 
     i2.receive(); // Sends ARP reply
@@ -360,7 +366,36 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
             i2.ip_address,
             i1.ip_address,
             64,
-            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes()
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
+            true
+        )
+    );
+}
+
+#[test]
+fn Ping_Self_ReceiveIcmpEchoRequest() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
+
+    sim.add(i1.ethernet.port());
+
+    // Act
+    i1.send_icmp(i1.ip_address, IcmpType::EchoRequest);
+    sim.transmit();
+
+    let i1_frames = i1.receive();
+
+    // Assert
+    assert_eq!(i1_frames.len(), 1);
+    assert_eq!(
+        i1_frames[0],
+        Ipv4Frame::new(
+            i1.ip_address,
+            i1.ip_address,
+            64,
+            IcmpFrame::echo_request(0, 0, vec![]).to_bytes(),
+            true
         )
     );
 }

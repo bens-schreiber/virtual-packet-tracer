@@ -1,10 +1,13 @@
 #![allow(non_snake_case)]
 
-use crate::{mac_addr, network::{
-    device::{cable::CableSimulator, router::Router},
-    ethernet::ByteSerialize,
-    ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Frame},
-}};
+use crate::{
+    mac_addr,
+    network::{
+        device::{cable::CableSimulator, router::Router},
+        ethernet::ByteSerialize,
+        ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Frame},
+    },
+};
 
 #[test]
 fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
@@ -49,7 +52,8 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
             i1.default_gateway.unwrap(),
             [192, 168, 1, 2],
             64,
-            IcmpFrame::destination_unreachable(0, vec![]).to_bytes()
+            IcmpFrame::destination_unreachable(0, vec![]).to_bytes(),
+            true
         )
     );
 }
@@ -89,7 +93,13 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     assert_eq!(r_p0_receive.len(), 1);
     assert_eq!(
         r_p0_receive[0],
-        Ipv4Frame::new(i1.ip_address, i1.default_gateway.unwrap(), 64, data.clone())
+        Ipv4Frame::new(
+            i1.ip_address,
+            i1.default_gateway.unwrap(),
+            64,
+            data.clone(),
+            false
+        )
     );
 }
 
@@ -147,7 +157,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 63, data.clone())
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 63, data.clone(), false)
     );
 }
 
@@ -212,6 +222,6 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 62, data.clone())
+        Ipv4Frame::new(i1.ip_address, i2.ip_address, 62, data.clone(), false)
     );
 }

@@ -44,7 +44,13 @@ pub struct Ipv4Frame {
 }
 
 impl Ipv4Frame {
-    pub fn new(source: Ipv4Address, destination: Ipv4Address, ttl: u8, data: Vec<u8>) -> Ipv4Frame {
+    pub fn new(
+        source: Ipv4Address,
+        destination: Ipv4Address,
+        ttl: u8,
+        data: Vec<u8>,
+        icmp: bool,
+    ) -> Ipv4Frame {
         Ipv4Frame {
             version_hlen: 0x45, // Ipv4, 5 words
             tos: 0,
@@ -52,8 +58,8 @@ impl Ipv4Frame {
             id: 0,
             flags_fragment_offset: 0,
             ttl,
-            protocol: 0,
-            checksum: 0, // TODO: Calculate checksum
+            protocol: if icmp { 1 } else { 0 }, // 1 icmp 0 tcp
+            checksum: 0,                        // TODO: Calculate checksum
             source,
             destination,
             option: Vec::new(),
@@ -223,6 +229,13 @@ impl ByteSerialize for ArpFrame {
             target_ip,
         })
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum IcmpType {
+    EchoRequest = 8,
+    EchoReply = 0,
+    Unreachable = 3,
 }
 
 #[derive(Debug, PartialEq)]
