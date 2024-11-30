@@ -1,11 +1,24 @@
+pub mod terminal;
 pub mod tick;
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::Ipv4Addr,
+};
 
 use raylib::prelude::*;
+use terminal::DesktopTerminal;
 use tick::Tickable;
 
 use crate::network::device::{cable::CableSimulator, desktop::Desktop};
+
+/*
+
+TODO:
+- Draggable windows
+- Fix multiple windows open at once
+- Blinking cursor for terminal
+*/
 
 type EntityId = u64;
 
@@ -30,31 +43,28 @@ fn rstr_from_string(s: String) -> std::ffi::CString {
     std::ffi::CString::new(s).expect("CString::new failed")
 }
 
-fn array_to_string(array: &[u8; 255]) -> String {
+fn array_to_string(array: &[u8]) -> String {
     let end = array.iter().position(|&c| c == 0).unwrap_or(array.len());
     let slice = &array[..end];
     String::from_utf8_lossy(slice).to_string()
 }
 
-struct DropdownGuiState {
-    open: bool,
-    selection: i32,
-    pos: Vector2,
+enum DropdownKind {
+    Options,
+    Connections,
 }
 
-impl Default for DropdownGuiState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            selection: -1,
-            pos: Vector2::zero(),
-        }
-    }
+struct DropdownGuiState {
+    selection: i32,
+    pos: Vector2,
+    kind: DropdownKind,
+    bounds: Rectangle, // Staticly positioned, dynamically popualted; has to call first render to be set
 }
 
 struct DisplayGuiState {
     open: bool,
     pos: Vector2,
+    drag_origin: Option<Vector2>,
 
     ip_buffer: [u8; 15],
     ip_edit_mode: bool,
@@ -63,7 +73,6 @@ struct DisplayGuiState {
     subnet_edit_mode: bool,
 
     cmd_line_buffer: [u8; 0xFF],
-    cmd_line_edit_mode: bool,
     cmd_line_out: VecDeque<String>,
 }
 
@@ -88,14 +97,22 @@ impl DisplayGuiState {
         Self {
             open: false,
             pos: Vector2::zero(),
+            drag_origin: None,
             ip_buffer,
             ip_edit_mode: false,
             subnet_buffer,
             subnet_edit_mode: false,
             cmd_line_buffer: [0u8; 0xFF],
-            cmd_line_edit_mode: false,
             cmd_line_out: VecDeque::new(),
         }
+    }
+
+    pub fn bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 300.0, 200.0)
+    }
+
+    pub fn tab_bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
     }
 }
 
@@ -106,9 +123,9 @@ struct DesktopEntity {
     label: String,
     adj_list: Vec<EntityId>,
 
-    options_gui: DropdownGuiState,
-    connection_gui: DropdownGuiState,
+    dropdown_gui: Option<DropdownGuiState>,
 
+    terminal: DesktopTerminal,
     display_gui: DisplayGuiState,
 
     deleted: bool,
@@ -117,17 +134,17 @@ struct DesktopEntity {
 impl DesktopEntity {
     fn new(id: EntityId, pos: Vector2, label: String) -> Self {
         let desktop = Desktop::from_seed(id);
-        let ip = desktop.interface.ip_address;
-        let subnet = desktop.interface.subnet_mask;
+        let display_gui =
+            DisplayGuiState::new(desktop.interface.ip_address, desktop.interface.subnet_mask);
         Self {
             id,
             pos,
             desktop,
             label,
             adj_list: vec![],
-            options_gui: DropdownGuiState::default(),
-            connection_gui: DropdownGuiState::default(),
-            display_gui: DisplayGuiState::new(ip, subnet),
+            dropdown_gui: None,
+            terminal: DesktopTerminal::new(),
+            display_gui,
             deleted: false,
         }
     }
@@ -154,95 +171,57 @@ impl DesktopEntity {
         );
     }
 
-    fn open_options(&mut self, pos: Vector2) {
-        self.options_gui = DropdownGuiState {
-            open: true,
+    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
+        self.dropdown_gui = Some(DropdownGuiState {
             selection: -1,
             pos,
-        }
-    }
-
-    fn open_connections(&mut self, pos: Vector2) {
-        self.connection_gui = DropdownGuiState {
-            open: true,
-            selection: -1,
-            pos,
-        };
+            kind,
+            bounds: Rectangle::new(pos.x, pos.y, 75.0, 16.0), // Contains at least one option
+        });
+        s.open_dropdown = Some(self.id);
     }
 
     /// Returns true if some poppable state is open
     fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
-        let mut render_options = |d: &mut RaylibDrawHandle| {
-            let ds = &mut self.options_gui;
-            if !ds.open {
-                return;
-            }
-
-            let mut _scroll_index = 0;
-
-            d.gui_list_view(
-                Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0),
-                Some(rstr!("Options;Delete")),
-                &mut _scroll_index,
-                &mut ds.selection,
-            );
-        };
-
-        let mut render_connections = |d: &mut RaylibDrawHandle| {
-            let ds = &mut self.connection_gui;
-            if !ds.open {
-                return;
-            }
-
-            let mut _scroll_index = 0;
-
-            d.gui_list_view(
-                Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5),
-                Some(rstr!("Ethernet0/1")),
-                &mut _scroll_index,
-                &mut ds.selection,
-            );
-        };
-
-        let mut render_display = |d: &mut RaylibDrawHandle, s: &mut GuiState| {
-            let ds = &mut self.display_gui;
-            if !ds.open {
-                return;
-            }
-
+        let mut render_display = |ds: &mut DisplayGuiState, d: &mut RaylibDrawHandle| {
             if d.gui_window_box(
-                Rectangle::new(self.pos.x, self.pos.y, 300.0, 250.0),
+                ds.bounds(),
                 Some(rstr_from_string(self.label.clone()).as_c_str()),
             ) {
-                ds.open = false;
-                s.open_windows.retain(|(id, _)| *id != self.id);
+                return true;
             }
 
             // Configure IP
             //----------------------------------------------
             d.gui_label(
-                Rectangle::new(self.pos.x + 10.0, self.pos.y + 30.0, 100.0, 20.0),
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 30.0, 100.0, 20.0),
                 Some(rstr!("IP Address")),
             );
 
             if d.gui_text_box(
-                Rectangle::new(self.pos.x + 120.0, self.pos.y + 30.0, 150.0, 20.0),
+                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 30.0, 150.0, 20.0),
                 &mut ds.ip_buffer,
                 ds.ip_edit_mode,
             ) {
                 ds.ip_edit_mode = !ds.ip_edit_mode;
+                match array_to_string(&ds.ip_buffer).parse::<Ipv4Addr>() {
+                    Ok(ip) => {
+                        self.desktop.interface.ip_address = ip.octets();
+                    }
+                    _ => {}
+                }
             }
             //----------------------------------------------
 
             // Configure Subnet Mask
             //----------------------------------------------
             d.gui_label(
-                Rectangle::new(self.pos.x + 10.0, self.pos.y + 60.0, 100.0, 20.0),
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 60.0, 100.0, 20.0),
                 Some(rstr!("Subnet Mask")),
             );
 
             if d.gui_text_box(
-                Rectangle::new(self.pos.x + 120.0, self.pos.y + 60.0, 150.0, 20.0),
+                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 60.0, 150.0, 20.0),
                 &mut ds.subnet_buffer,
                 ds.subnet_edit_mode,
             ) {
@@ -253,16 +232,20 @@ impl DesktopEntity {
             // Command Line
             //----------------------------------------------
             d.draw_rectangle_rec(
-                Rectangle::new(self.pos.x + 10.0, self.pos.y + 90.0, 280.0, 100.0),
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 90.0, 280.0, 100.0),
                 Color::BLACK,
             );
 
             // Output
-            let mut y = self.pos.y + 160.0;
+            if let Some(out) = self.terminal.out() {
+                ds.cmd_line_out.push_back(out);
+            }
+
+            let mut y = ds.pos.y + 160.0;
             for line in ds.cmd_line_out.iter().rev() {
-                d.draw_text(line, self.pos.x as i32 + 15, y as i32, 10, Color::WHITE);
+                d.draw_text(line, ds.pos.x as i32 + 15, y as i32, 10, Color::WHITE);
                 y -= 15.0;
-                if y < self.pos.y + 90.0 {
+                if y < ds.pos.y + 90.0 {
                     break;
                 }
             }
@@ -287,101 +270,124 @@ impl DesktopEntity {
                 GuiControlProperty::TEXT_COLOR_PRESSED as i32,
                 Color::WHITE.color_to_int(),
             );
-            d.draw_text(
-                "Desktop %",
-                self.pos.x as i32 + 15,
-                self.pos.y.trunc() as i32 + 175,
-                10,
-                Color::WHITE,
-            );
-            if d.gui_text_box(
-                Rectangle::new(self.pos.x + 71.0, self.pos.y + 170.0, 210.0, 20.0),
-                &mut ds.cmd_line_buffer,
-                true,
-            ) {
-                if d.is_key_pressed(KeyboardKey::KEY_ENTER) {
-                    ds.cmd_line_out.push_back(format!(
-                        "Desktop % {}",
-                        array_to_string(&ds.cmd_line_buffer)
-                    ));
+            if !self.terminal.channel_open {
+                d.draw_text(
+                    "Desktop %",
+                    ds.pos.x as i32 + 15,
+                    ds.pos.y.trunc() as i32 + 175,
+                    10,
+                    Color::WHITE,
+                );
+            }
 
-                    if ds.cmd_line_out.len() > 8 {
-                        ds.cmd_line_out.pop_front();
-                    }
+            if !self.terminal.channel_open
+                && d.gui_text_box(
+                    Rectangle::new(ds.pos.x + 71.0, ds.pos.y + 170.0, 210.0, 20.0),
+                    &mut ds.cmd_line_buffer,
+                    !ds.ip_edit_mode && !ds.subnet_edit_mode,
+                )
+                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
+            {
+                self.terminal
+                    .input(array_to_string(&ds.cmd_line_buffer), &mut self.desktop);
+                ds.cmd_line_out.push_back(format!(
+                    "Desktop % {}",
+                    array_to_string(&ds.cmd_line_buffer)
+                ));
 
-                    ds.cmd_line_buffer = [0u8; 0xFF];
-                } else {
-                    ds.cmd_line_edit_mode = !ds.cmd_line_edit_mode;
+                if ds.cmd_line_out.len() > 8 {
+                    ds.cmd_line_out.pop_front();
                 }
+                ds.cmd_line_buffer = [0u8; 0xFF];
             }
             d.gui_load_style_default();
             //----------------------------------------------
+            return false;
         };
 
-        render_display(d, s);
-        render_options(d);
-        render_connections(d);
-    }
-
-    fn handle_gui_clicked(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) {
-        fn close_dropdown(ds: &mut DropdownGuiState, s: &mut GuiState) {
-            ds.open = false;
-            ds.selection = -1;
-            s.sim_lock = false;
-        }
-
-        fn dismiss_dropdown(
-            ds: &mut DropdownGuiState,
-            s: &mut GuiState,
-            rl: &RaylibHandle,
-            bounds: Rectangle,
-        ) {
-            if ds.selection == -1 && ds.open {
-                if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                    let mouse_pos = rl.get_mouse_position();
-                    if !bounds.check_collision_point_rec(mouse_pos) {
-                        close_dropdown(ds, s);
-                    }
+        if self.dropdown_gui.is_some() {
+            let ds = self.dropdown_gui.as_mut().unwrap();
+            match ds.kind {
+                DropdownKind::Options => {
+                    let mut _scroll_index = 0;
+                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
+                    d.gui_list_view(
+                        ds.bounds,
+                        Some(rstr!("Options;Delete")),
+                        &mut _scroll_index,
+                        &mut ds.selection,
+                    );
+                }
+                DropdownKind::Connections => {
+                    let mut _scroll_index = 0;
+                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5);
+                    d.gui_list_view(
+                        ds.bounds,
+                        Some(rstr!("Ethernet0/1")),
+                        &mut _scroll_index,
+                        &mut ds.selection,
+                    );
                 }
             }
         }
 
-        let mut handle_options = |rl: &mut RaylibHandle, s: &mut GuiState| {
-            let ds = &mut self.options_gui;
-            if !ds.open {
+        if self.display_gui.open {
+            if render_display(&mut self.display_gui, d) {
+                s.open_windows.retain(|id| *id != self.id);
+                self.display_gui.open = false;
                 return;
             }
 
+            if self.display_gui.drag_origin.is_some()
+                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
+            {
+                self.display_gui.drag_origin = None;
+                return;
+            }
+
+            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+                if self.display_gui.drag_origin.is_none()
+                    && self
+                        .display_gui
+                        .tab_bounds()
+                        .check_collision_point_rec(d.get_mouse_position())
+                {
+                    self.display_gui.drag_origin =
+                        Some(d.get_mouse_position() - self.display_gui.pos);
+                }
+
+                if self.display_gui.drag_origin.is_some() {
+                    self.display_gui.pos =
+                        d.get_mouse_position() - self.display_gui.drag_origin.unwrap();
+                }
+            }
+        }
+    }
+
+    /// Returns true if the click should be propogated to the sim
+    fn handle_dropdown_clicked(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
+        let mut handle_options = |ds: &DropdownGuiState, rl: &RaylibHandle| {
             // Handle dropdown clicked
             match ds.selection {
                 // Options
                 0 => {
                     self.display_gui.open = true;
-                    s.open_windows.push((
-                        self.id,
-                        Rectangle::new(self.pos.x, self.pos.y, 300.0, 300.0),
-                    ));
-                    close_dropdown(ds, s);
+                    self.display_gui.pos = rl.get_mouse_position();
+                    s.open_windows.push(self.id);
+                    return true;
                 }
                 // Delete
                 1 => {
                     self.deleted = true;
-                    close_dropdown(ds, s);
-                    print!("Deleted device {}", self.id);
+                    return true;
                 }
-                _ => {}
+                _ => {
+                    return false;
+                }
             }
-
-            // Dismiss dropdown menu
-            dismiss_dropdown(ds, s, rl, Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0));
         };
 
-        let mut handle_connections = |rl: &mut RaylibHandle, s: &mut GuiState| {
-            let ds = &mut self.connection_gui;
-            if !ds.open {
-                return;
-            }
-
+        let mut handle_connections = |ds: &DropdownGuiState| {
             // Handle dropdown clicked
             match ds.selection {
                 // Ethernet0/1
@@ -400,17 +406,37 @@ impl DesktopEntity {
                         _ => {}
                     }
 
-                    close_dropdown(ds, s);
+                    return true;
                 }
-                _ => {}
+                _ => {
+                    return false;
+                }
             }
-
-            // Dismiss dropdown menu
-            dismiss_dropdown(ds, s, rl, Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5));
         };
 
-        handle_options(rl, s);
-        handle_connections(rl, s);
+        if let Some(ds) = &self.dropdown_gui {
+            let close = match ds.kind {
+                DropdownKind::Options => handle_options(ds, rl),
+                DropdownKind::Connections => handle_connections(ds),
+            };
+
+            if close {
+                s.open_dropdown = None;
+                self.dropdown_gui = None;
+                return false;
+            }
+
+            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                let mouse_pos = rl.get_mouse_position();
+                if !ds.bounds.check_collision_point_rec(mouse_pos) {
+                    s.open_dropdown = None;
+                    self.dropdown_gui = None;
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     fn connect(a_i: usize, b_i: usize, devices: &mut Vec<DesktopEntity>) {
@@ -460,12 +486,14 @@ impl DesktopEntity {
     }
 
     fn tick(&mut self) {
+        self.terminal.tick(&mut self.desktop);
         self.desktop.tick();
     }
 }
 
-fn handle_sim_clicked(
+fn handle_click(
     s: &mut GuiState,
+    sim: &mut CableSimulator,
     rl: &mut RaylibHandle,
     devices: &mut Vec<DesktopEntity>,
     desktop_count: &mut u64,
@@ -473,11 +501,21 @@ fn handle_sim_clicked(
 ) {
     let mouse_pos = rl.get_mouse_position();
 
-    // If we are clicking on a window, the sim shouldn't do anything
-    if s.open_windows
-        .iter()
-        .any(|(_, rec)| rec.check_collision_point_rec(mouse_pos))
-    {
+    if s.open_dropdown.is_some() {
+        let id = s.open_dropdown.unwrap();
+        let (i, _) = get_entity(id, devices);
+        if !devices[i].handle_dropdown_clicked(rl, s) {
+            return;
+        }
+    }
+
+    if s.open_windows.iter().any(|id| {
+        let (i, _) = get_entity(*id, devices);
+        devices[i]
+            .display_gui
+            .bounds()
+            .check_collision_point_rec(mouse_pos)
+    }) {
         return;
     }
 
@@ -502,10 +540,8 @@ fn handle_sim_clicked(
     //------------------------------------------------------
     if right_mouse_clicked {
         // Open a dropdown menu for a device if collision
-        if let Some((i, entity)) = mouse_collision {
-            s.dropdown_device = Some(entity.id);
-            s.sim_lock = true;
-            devices[i].open_options(mouse_pos);
+        if let Some((i, _)) = mouse_collision {
+            devices[i].dropdown(DropdownKind::Options, mouse_pos, s);
         }
         return;
     }
@@ -555,10 +591,8 @@ fn handle_sim_clicked(
                 }
 
                 if s.remove_d.is_none() {
-                    let (i, entity) = mouse_collision.unwrap();
-                    s.dropdown_device = Some(entity.id);
-                    s.sim_lock = true;
-                    devices[i].open_connections(mouse_pos);
+                    let (i, _) = mouse_collision.unwrap();
+                    devices[i].dropdown(DropdownKind::Connections, mouse_pos, s);
                     return;
                 }
             }
@@ -581,10 +615,8 @@ fn handle_sim_clicked(
                     return;
                 }
 
-                let (i, entity) = mouse_collision.unwrap();
-                s.dropdown_device = Some(entity.id);
-                s.sim_lock = true;
-                devices[i].open_connections(mouse_pos);
+                let (i, _) = mouse_collision.unwrap();
+                devices[i].dropdown(DropdownKind::Connections, mouse_pos, s);
                 return;
             }
 
@@ -630,6 +662,7 @@ fn handle_sim_clicked(
                     mouse_pos,
                     format!("Desktop {}", *desktop_count),
                 ));
+                sim.add(devices.last().unwrap().desktop.interface.ethernet.port());
                 *entity_seed += 1;
                 *desktop_count += 1;
                 return;
@@ -673,11 +706,10 @@ fn draw_connections(d: &mut RaylibDrawHandle, devices: &Vec<DesktopEntity>) {
         let origin = &device.pos;
         for adj_id in &device.adj_list {
             let target = &devices[id_lookup[adj_id]].pos;
-            d.draw_line(
-                origin.x as i32,
-                origin.y as i32,
-                target.x as i32,
-                target.y as i32,
+            d.draw_line_ex(
+                Vector2::new(origin.x, origin.y),
+                Vector2::new(target.x, target.y),
+                1.5,
                 Color::WHITE,
             );
         }
@@ -923,13 +955,10 @@ enum GuiMode {
 }
 
 struct GuiState {
-    sim_lock: bool,
-
     mode: GuiMode,
 
-    dropdown_device: Option<EntityId>,
-
-    open_windows: Vec<(EntityId, Rectangle)>,
+    open_dropdown: Option<EntityId>,
+    open_windows: Vec<EntityId>,
 
     place_type: Option<DeviceKind>,
 
@@ -948,12 +977,9 @@ struct GuiState {
 impl Default for GuiState {
     fn default() -> Self {
         Self {
-            sim_lock: false,
-
             mode: GuiMode::Select,
 
-            dropdown_device: None,
-
+            open_dropdown: None,
             open_windows: vec![],
 
             place_type: None,
@@ -991,19 +1017,14 @@ pub fn run() {
     let mut s = GuiState::default();
 
     while !rl.window_should_close() {
-        if !s.sim_lock {
-            handle_sim_clicked(
-                &mut s,
-                &mut rl,
-                &mut devices,
-                &mut desktop_count,
-                &mut entity_seed,
-            );
-        } else {
-            let id = s.dropdown_device.unwrap();
-            let (i, _) = get_entity(id, &devices);
-            devices[i].handle_gui_clicked(&mut rl, &mut s);
-        }
+        handle_click(
+            &mut s,
+            &mut cable_sim,
+            &mut rl,
+            &mut devices,
+            &mut desktop_count,
+            &mut entity_seed,
+        );
 
         cable_sim.tick();
 
@@ -1027,18 +1048,13 @@ pub fn run() {
         draw_connections(&mut d, &devices);
 
         if s.mode == GuiMode::Connect && s.connect_d1.is_some() && s.connect_d2.is_none() {
-            last_connected_pos = if s.sim_lock {
-                last_connected_pos
-            } else {
-                d.get_mouse_position()
-            };
+            last_connected_pos = d.get_mouse_position();
 
             let (_, entity) = get_entity(s.connect_d1.unwrap(), &mut devices);
-            d.draw_line(
-                entity.pos.x as i32,
-                entity.pos.y as i32,
-                last_connected_pos.x as i32,
-                last_connected_pos.y as i32,
+            d.draw_line_ex(
+                Vector2::new(entity.pos.x, entity.pos.y),
+                Vector2::new(last_connected_pos.x, last_connected_pos.y),
+                1.5,
                 Color::WHITE,
             );
         }
