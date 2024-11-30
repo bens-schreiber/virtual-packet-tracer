@@ -1055,6 +1055,7 @@ pub fn run() {
         // Lazy delete devices
         for i in deleted_devices.iter().rev() {
             DesktopEntity::disconnect(*i, &mut devices);
+            cable_sim.remove(devices[*i].desktop.interface.ethernet.port());
             devices.remove(*i);
         }
         deleted_devices.clear();

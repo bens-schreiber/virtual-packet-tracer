@@ -4,7 +4,7 @@ use crate::{
     is_ipv4_multicast_or_broadcast, mac_addr,
     network::{
         ethernet::{ByteSerialize, MacAddress},
-        ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Address},
+        ipv4::{interface::Ipv4Interface, IcmpType, Ipv4Address},
     },
     network_address,
     simulation::tick::{TickTimer, Tickable},

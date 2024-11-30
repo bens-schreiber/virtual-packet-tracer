@@ -27,6 +27,22 @@ impl CableSimulator {
         }
     }
 
+    /// Removes a port from the simulator.
+    /// * `ethernet_port` - The port to remove from the simulator.
+    pub fn remove(&mut self, ethernet_port: Rc<RefCell<EthernetPort>>) {
+        self.ports.retain(|port| Rc::ptr_eq(port, &ethernet_port));
+    }
+
+    /// Removes multiple ports from the simulator.
+    /// * `ethernet_ports` - The ports to remove from the simulator.
+    pub fn removes(&mut self, ethernet_ports: Vec<Rc<RefCell<EthernetPort>>>) {
+        self.ports.retain(|port| {
+            !ethernet_ports
+                .iter()
+                .any(|ethernet_port| Rc::ptr_eq(port, ethernet_port))
+        });
+    }
+
     /// Simulates the movement of data over the physical connection.
     ///
     /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
