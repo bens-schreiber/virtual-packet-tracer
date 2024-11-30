@@ -12,13 +12,11 @@ use tick::Tickable;
 
 use crate::network::device::{cable::CableSimulator, desktop::Desktop};
 
-/*
-
-TODO:
-- Draggable windows
-- Fix multiple windows open at once
-- Blinking cursor for terminal
-*/
+/**
+ *
+ * Bug bounty:
+ * - Dragging windows with devices on the screen can sometimes enter a state where the sim is in drag mode
+ */
 
 type EntityId = u64;
 
@@ -184,11 +182,27 @@ impl DesktopEntity {
     /// Returns true if some poppable state is open
     fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
         let mut render_display = |ds: &mut DisplayGuiState, d: &mut RaylibDrawHandle| {
+            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+                && ds
+                    .bounds()
+                    .check_collision_point_rec(d.get_mouse_position())
+            {
+                s.selected_window = Some(self.id); // Window engaged
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
+            }
+
             if d.gui_window_box(
                 ds.bounds(),
                 Some(rstr_from_string(self.label.clone()).as_c_str()),
             ) {
                 return true;
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
             }
 
             // Configure IP
@@ -284,7 +298,7 @@ impl DesktopEntity {
                 && d.gui_text_box(
                     Rectangle::new(ds.pos.x + 71.0, ds.pos.y + 170.0, 210.0, 20.0),
                     &mut ds.cmd_line_buffer,
-                    !ds.ip_edit_mode && !ds.subnet_edit_mode,
+                    !ds.ip_edit_mode && !ds.subnet_edit_mode && s.selected_window == Some(self.id),
                 )
                 && d.is_key_pressed(KeyboardKey::KEY_ENTER)
             {
@@ -958,6 +972,7 @@ struct GuiState {
     mode: GuiMode,
 
     open_dropdown: Option<EntityId>,
+    selected_window: Option<EntityId>,
     open_windows: Vec<EntityId>,
 
     place_type: Option<DeviceKind>,
@@ -980,6 +995,7 @@ impl Default for GuiState {
             mode: GuiMode::Select,
 
             open_dropdown: None,
+            selected_window: None,
             open_windows: vec![],
 
             place_type: None,
@@ -1048,7 +1064,11 @@ pub fn run() {
         draw_connections(&mut d, &devices);
 
         if s.mode == GuiMode::Connect && s.connect_d1.is_some() && s.connect_d2.is_none() {
-            last_connected_pos = d.get_mouse_position();
+            last_connected_pos = if s.open_dropdown.is_some() {
+                last_connected_pos
+            } else {
+                d.get_mouse_position()
+            };
 
             let (_, entity) = get_entity(s.connect_d1.unwrap(), &mut devices);
             d.draw_line_ex(
@@ -1085,7 +1105,15 @@ pub fn run() {
         }
 
         for device in devices.iter_mut() {
+            if Some(device.id) == s.selected_window {
+                continue;
+            }
             device.render_gui(&mut d, &mut s);
+        }
+
+        if let Some(selected_window) = s.selected_window {
+            let (i, _) = get_entity(selected_window, &devices);
+            devices[i].render_gui(&mut d, &mut s);
         }
 
         draw_controls_panel(&mut d, &mut s);
