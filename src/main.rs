@@ -13,6 +13,7 @@ mod network {
 }
 
 mod simulation;
+mod tick;
 
 #[cfg(test)]
 mod tests {

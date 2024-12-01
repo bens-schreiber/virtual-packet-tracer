@@ -1,12 +1,13 @@
 use std::{collections::HashMap, net::Ipv4Addr};
 
-use crate::network::{
-    device::desktop::Desktop,
-    ethernet::ByteSerialize,
-    ipv4::{IcmpFrame, IcmpType},
+use crate::{
+    network::{
+        device::desktop::Desktop,
+        ethernet::ByteSerialize,
+        ipv4::{IcmpFrame, IcmpType},
+    },
+    tick::{TickTimer, Tickable},
 };
-
-use super::tick::{TickTimer, Tickable};
 
 #[derive(Debug, PartialEq, Hash, Eq, Clone)]
 enum TerminalCommand {
@@ -109,12 +110,10 @@ impl DesktopTerminal {
             Some(TerminalCommand::Ping) => {
                 // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
                 for frame in desktop.interface.receive() {
-                    print!("{:?}\n", frame);
                     if frame.protocol == 1 {
                         let icmp = match IcmpFrame::from_bytes(frame.data) {
                             Ok(icmp) => icmp,
                             Err(_) => {
-                                print!("err: parse icmp frame\n");
                                 self.channel_open = false;
                                 return;
                             }
