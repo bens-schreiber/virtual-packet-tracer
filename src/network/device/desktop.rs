@@ -1,7 +1,7 @@
 use crate::{
     mac_addr,
     network::ipv4::{interface::Ipv4Interface, Ipv4Frame},
-    simulation::tick::Tickable,
+    tick::Tickable,
 };
 
 pub struct Desktop {

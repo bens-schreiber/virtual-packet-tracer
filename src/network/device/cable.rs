@@ -1,4 +1,4 @@
-use crate::simulation::tick::Tickable;
+use crate::tick::Tickable;
 use std::{cell::RefCell, rc::Rc};
 
 /// Simulates the movement of data.

@@ -190,7 +190,6 @@ impl Ipv4Interface {
 
         // Send an ARP request to find the MAC address of the target IP address
         // Buffer the frame to send after the ARP request is resolved
-        println!("ARP request for {:?}", key.unwrap());
         self.arp_buf
             .push(WaitForArpResolveFrame::new(key.unwrap(), frame));
         self.ethernet.arp_request(self.ip_address, key.unwrap());
@@ -286,7 +285,6 @@ impl Ipv4Interface {
 
             if f.ether_type == EtherType::Arp {
                 if let Ok(arp_frame) = ArpFrame::from_bytes(f.data) {
-                    print!("ARP frame");
                     self._receive_arp(arp_frame);
                 }
             }
@@ -359,13 +357,11 @@ impl Ipv4Interface {
                 w.ttl = 30;
 
                 // Retry ARP request
-                println!("ARP request retry for {:?}", w.ip);
                 self.ethernet
                     .arp_request(self.ip_address, w.frame.destination);
             }
 
             if let Some(mac_address) = self.arp_table.get(&w.ip) {
-                println!("ARP resolved for {:?}", w.ip);
                 self.ethernet
                     .send(*mac_address, EtherType::Ipv4, w.frame.to_bytes());
                 w.retry = 0;

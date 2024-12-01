@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     is_mac_multicast_or_broadcast, mac_addr,
     network::ethernet::{interface::*, *},
-    simulation::tick::{TickTimer, Tickable},
+    tick::{TickTimer, Tickable},
 };
 
 use super::cable::*;

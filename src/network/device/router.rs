@@ -7,7 +7,7 @@ use crate::{
         ipv4::{interface::Ipv4Interface, IcmpType, Ipv4Address},
     },
     network_address,
-    simulation::tick::{TickTimer, Tickable},
+    tick::{TickTimer, Tickable},
 };
 
 use super::cable::EthernetPort;

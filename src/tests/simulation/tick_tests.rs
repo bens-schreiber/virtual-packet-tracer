@@ -7,7 +7,7 @@ use crate::{
         ethernet::{interface::EthernetInterface, EtherType},
         ipv4::interface::Ipv4Interface,
     },
-    simulation::tick::Tickable,
+    tick::Tickable,
 };
 
 /**
