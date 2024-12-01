@@ -35,7 +35,7 @@ fn ping(t: &mut DesktopTerminal, d: &mut Desktop, args: &[&str]) {
     }
 }
 
-// TODO: this should most certainly be lazy, but my rust is limited atm
+// TODO: this should most certainly be lazy
 type DesktopTerminalCommand = fn(&mut DesktopTerminal, &mut Desktop, &[&str]) -> ();
 fn desktop_terminal_dict() -> HashMap<String, DesktopTerminalCommand> {
     let mut dict = HashMap::new();
@@ -101,6 +101,7 @@ impl DesktopTerminal {
                     self.channel_open = false;
                     self.channel_command = None;
                 }
+                _ => {}
             }
         }
 
@@ -129,7 +130,7 @@ impl DesktopTerminal {
                     }
                 }
             }
-            None => {
+            _ => {
                 self.channel_open = false;
             }
         }

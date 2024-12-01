@@ -5,12 +5,7 @@ mod utils;
 use device::{DropdownKind, Entities, Entity, EntityId};
 use raylib::prelude::*;
 
-fn handle_click(
-    s: &mut GuiState,
-    rl: &mut RaylibHandle,
-    es: &mut Entities,
-    desktop_count: &mut u64,
-) {
+fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
     let mouse_pos = rl.get_mouse_position();
 
     if let Some(id) = s.open_dropdown {
@@ -49,7 +44,7 @@ fn handle_click(
     if right_mouse_clicked {
         // Open a dropdown menu for a device if collision
         if let Some(e) = mouse_collision {
-            e.dropdown(DropdownKind::Options, mouse_pos, s);
+            e.dropdown(DropdownKind::Edit, mouse_pos, s);
         }
         return;
     }
@@ -161,11 +156,13 @@ fn handle_click(
             {
                 match s.place_type {
                     Some(DeviceKind::Desktop) => {
-                        es.add_desktop(mouse_pos, format!("Desktop {}", desktop_count));
-                        *desktop_count += 1;
+                        es.add_desktop(mouse_pos);
+                    }
+                    Some(DeviceKind::Switch) => {
+                        es.add_switch(mouse_pos);
                     }
                     _ => {
-                        todo!("Place device");
+                        todo!()
                     }
                 }
                 return;
@@ -492,8 +489,6 @@ pub fn run() {
 
     rl.set_target_fps(30);
 
-    let mut desktop_count: u64 = 0;
-
     let mut es = Entities::new();
 
     let mut last_connected_pos = Vector2::zero();
@@ -502,7 +497,7 @@ pub fn run() {
 
     while !rl.window_should_close() {
         es.update();
-        handle_click(&mut s, &mut rl, &mut es, &mut desktop_count);
+        handle_click(&mut s, &mut rl, &mut es);
 
         let mut d = rl.begin_drawing(&thread);
 

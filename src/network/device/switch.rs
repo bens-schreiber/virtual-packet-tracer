@@ -116,7 +116,6 @@ impl Switch {
     /// * `port_id` - The port on this switch to connect.
     /// * `other_switch` - The other switch to connect to.
     /// * `other_port_id` - The port on the other switch to connect to.
-    #[cfg(test)]
     pub fn connect_switch(
         &mut self,
         port_id: usize,
