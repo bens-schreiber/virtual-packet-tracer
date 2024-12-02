@@ -70,7 +70,7 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
     i1.connect(&mut i2);
 
     // Act
-    let i1_sent_arp = !i1.send(i2.ip_address, eth2_data!(1));
+    let i1_sent_arp = i1.send(i2.ip_address, eth2_data!(1)) == Ok(false);
     sim.transmit();
 
     let i1_data = i1.ethernet.receive();
@@ -110,7 +110,7 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
     i1.connect(&mut i2);
 
     // Act
-    i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
+    let _ = i1.send(i2.ip_address, eth2_data!(1)); // Fails, sends ARP request
     sim.transmit();
 
     i2.receive(); // Sends ARP reply
@@ -150,7 +150,7 @@ fn Send_UnknownIpV4AfterMultipleRetries_ReceiveMultipleArpRequests() {
     i1.connect(&mut i2);
 
     // Act
-    i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
+    let _ = i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
     sim.transmit();
 
     for _ in 0..90 {
@@ -176,7 +176,7 @@ fn Send_SameSubnet_ReceivesIpv4Frame() {
     let i2_data = i2.receive();
 
     // Assert
-    assert!(i1_sent);
+    assert!(i1_sent.is_ok_and(|b| b));
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
@@ -195,7 +195,7 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
     i1.connect(&mut i2);
 
     // Act
-    i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
+    let _ = i1.send(i2.ip_address, eth2_data!(1)); // Fails, places in buffer
     sim.transmit();
 
     for _ in 0..60 {
@@ -244,7 +244,7 @@ fn Send_DifferentSubnet_SendsToDefaultGateway() {
     let dg_received = default_gateway.ethernet.receive();
 
     // Assert
-    assert!(!i1_sent);
+    assert!(i1_sent.is_ok_and(|b| !b));
     assert_eq!(dg_received.len(), 1);
 }
 
@@ -279,8 +279,8 @@ fn Send_FillsArpTableOnReceive_SendsWithoutArp() {
     let i1_data = i1.receive();
 
     // Assert
-    assert!(i1_sends);
-    assert!(i2_sends);
+    assert!(i1_sends.is_ok_and(|b| b));
+    assert!(i2_sends.is_ok_and(|b| b));
     assert_eq!(i2_data.len(), 1);
     assert_eq!(i1_data.len(), 1);
 }
@@ -314,7 +314,7 @@ fn Send_DifferentSubnetsWithoutDefaultGateway_DropsFrame() {
     let i2_data = i2.receive();
 
     // Assert
-    assert!(!i1_sent);
+    assert!(i1_sent.is_err());
     assert!(i2_data.is_empty());
 }
 
@@ -328,8 +328,8 @@ fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
     let i2_sent = i2.send(i1.ip_address, eth2_data!(2)); // Sends Ipv4 frame
 
     // Assert
-    assert!(i1_sent);
-    assert!(i2_sent);
+    assert!(i1_sent.is_ok_and(|b| b));
+    assert!(i2_sent.is_ok_and(|b| b));
 }
 
 #[test]
@@ -344,7 +344,7 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
     i1.connect(&mut i2);
 
     // Act
-    i1.send_icmp(i2.ip_address, IcmpType::EchoRequest);
+    let _ = i1.send_icmp(i2.ip_address, IcmpType::EchoRequest);
     sim.transmit();
 
     i2.receive(); // Sends ARP reply
@@ -373,7 +373,7 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
 }
 
 #[test]
-fn Ping_Self_ReceiveIcmpEchoRequest() {
+fn Ping_Self_ReceiveIcmpEchoReply() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
@@ -381,7 +381,7 @@ fn Ping_Self_ReceiveIcmpEchoRequest() {
     sim.add(i1.ethernet.port());
 
     // Act
-    i1.send_icmp(i1.ip_address, IcmpType::EchoRequest);
+    let _ = i1.send_icmp(i1.ip_address, IcmpType::EchoRequest);
     sim.transmit();
 
     let i1_frames = i1.receive();
@@ -394,7 +394,7 @@ fn Ping_Self_ReceiveIcmpEchoRequest() {
             i1.ip_address,
             i1.ip_address,
             64,
-            IcmpFrame::echo_request(0, 0, vec![]).to_bytes(),
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
             true
         )
     );

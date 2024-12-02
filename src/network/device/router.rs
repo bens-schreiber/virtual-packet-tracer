@@ -67,11 +67,10 @@ impl Router {
         let ports: [RefCell<RouterPort>; 8] = (0..8)
             .map(|i| {
                 RefCell::new(RouterPort {
-                    interface: RefCell::new(Ipv4Interface::new(
+                    interface: RefCell::new(Ipv4Interface::router_interface(
                         mac_addr!(mac_seed + i),
                         [0, 0, 0, 0],
                         [0, 0, 0, 0],
-                        None,
                     )),
                     enabled: false,
                     rip_enabled: false,
@@ -141,7 +140,7 @@ impl Router {
                     let d_rp = &mut *self.ports[route.port].borrow_mut();
 
                     // Send without modifying the source IP, just the MAC
-                    d_rp.interface.borrow_mut().sendv(
+                    let _ = d_rp.interface.borrow_mut().sendv(
                         frame.source,
                         frame.destination,
                         Some(route.ip_address),
@@ -153,7 +152,8 @@ impl Router {
                     continue;
                 }
 
-                rp.interface
+                let _ = rp
+                    .interface
                     .borrow_mut()
                     .send_icmp(frame.source, IcmpType::Unreachable);
             }
@@ -272,6 +272,7 @@ impl Router {
     }
 
     #[cfg(test)]
+    /// Connects a router to another router on the given ports.
     pub fn connect_router(&mut self, port: usize, other_router: &mut Router, other_port: usize) {
         if port >= self.ports.len() {
             panic!("Port {} is out of range for the router.", port);
@@ -297,7 +298,7 @@ impl Router {
     ///
     /// # Panics
     /// Panics if the port is out of range
-    pub fn disconnect_interface(&mut self, port: usize) {
+    pub fn disconnect(&mut self, port: usize) {
         if port >= self.ports.len() {
             panic!("Port {} is out of range for the router.", port);
         }
@@ -306,6 +307,8 @@ impl Router {
         if !rp.enabled {
             return;
         }
+
+        self.table.retain(|_, v| v.port != port);
 
         rp.interface.borrow_mut().disconnect();
         rp.enabled = false;

@@ -5,7 +5,7 @@ use crate::{
     network::{
         device::{cable::CableSimulator, router::Router},
         ethernet::ByteSerialize,
-        ipv4::{interface::Ipv4Interface, IcmpFrame, Ipv4Frame},
+        ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Frame},
     },
 };
 
@@ -30,7 +30,7 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
     let data: Vec<u8> = "Hello, world!".as_bytes().into();
 
     // Act
-    i1.send([192, 168, 2, 1], data.clone()); // ---- i1 -> r ARP
+    let _ = i1.send([192, 168, 2, 1], data.clone()); // ---- i1 -> r ARP
     sim.transmit();
 
     r.route();
@@ -79,7 +79,7 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     let data: Vec<u8> = "Hello, world!".as_bytes().into();
 
     // Act
-    i1.send(i1.default_gateway.unwrap(), data.clone());
+    let _ = i1.send(i1.default_gateway.unwrap(), data.clone());
     sim.transmit();
 
     r.route();
@@ -133,7 +133,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     let data: Vec<u8> = "Hello, world!".as_bytes().into();
 
     // Act
-    i1.send(i2.ip_address, data.clone()); // ---- i1 -> r Resolve mac addresses
+    let _ = i1.send(i2.ip_address, data.clone()); // ---- i1 -> r Resolve mac addresses
     sim.transmit();
 
     r.route();
@@ -205,7 +205,7 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     r2.route();
     sim.transmit();
 
-    i1.send(i2.ip_address, data.clone());
+    let _ = i1.send(i2.ip_address, data.clone());
 
     for _ in 0..6 {
         sim.transmit();
@@ -223,5 +223,218 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     assert_eq!(
         i2_data[0],
         Ipv4Frame::new(i1.ip_address, i2.ip_address, 62, data.clone(), false)
+    );
+}
+
+#[test]
+fn Route_PingDefaultGateway_ReceiveFrame() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut r1 = Router::from_seed(2);
+
+    r1.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.connect(0, &mut i1);
+
+    sim.add(i1.ethernet.port());
+    sim.adds(r1.ports());
+
+    // Act
+    let _ = i1.send_icmp(i1.default_gateway.unwrap(), IcmpType::EchoRequest); // ---- arp default gateway
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    i1.receive(); // ---- i1 -> r send frame
+    sim.transmit();
+
+    r1.route(); // ---- r -> i1 send
+    sim.transmit();
+
+    let i1_data = i1.receive();
+
+    // Assert
+    assert_eq!(i1_data.len(), 1);
+    assert_eq!(
+        i1_data[0],
+        Ipv4Frame::new(
+            i1.default_gateway.unwrap(),
+            i1.ip_address,
+            64, // Should not use the router, reply directly from the interface
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
+            true
+        )
+    );
+}
+
+#[test]
+fn Route_PingUnreachable_ReturnUnreachable() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut r1 = Router::from_seed(2);
+
+    r1.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.connect(0, &mut i1);
+
+    sim.add(i1.ethernet.port());
+    sim.adds(r1.ports());
+
+    // Act
+    let _ = i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest); // ---- arp default gateway
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    i1.receive(); // ---- i1 -> r send frame
+    sim.transmit();
+
+    r1.route(); // ---- r -> i1 send
+    sim.transmit();
+
+    let i1_data = i1.receive();
+
+    // Assert
+    assert_eq!(i1_data.len(), 1);
+    assert_eq!(
+        i1_data[0],
+        Ipv4Frame::new(
+            i1.default_gateway.unwrap(),
+            i1.ip_address,
+            64, // Should not use the router, reply directly from the interface
+            IcmpFrame::destination_unreachable(0, vec![]).to_bytes(),
+            true
+        )
+    );
+}
+
+#[test]
+fn Route_PingOtherRouterInterface_ReceiveFrame() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut r1 = Router::from_seed(2);
+
+    r1.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.enable_interface(1, [192, 168, 2, 1], [255, 255, 255, 0]);
+    r1.connect(0, &mut i1);
+
+    sim.add(i1.ethernet.port());
+    sim.adds(r1.ports());
+
+    // Act
+    let _ = i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest); // ---- arp default gateway
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    i1.receive(); // ---- i1 -> r send frame
+    sim.transmit();
+
+    r1.route(); // ---- r -> i1 send
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    let i1_data = i1.receive();
+
+    // Assert
+    assert_eq!(i1_data.len(), 1);
+    assert_eq!(
+        i1_data[0],
+        Ipv4Frame::new(
+            [192, 168, 2, 1],
+            i1.ip_address,
+            63, // Should not use the router, reply directly from the interface
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
+            true
+        )
+    );
+}
+
+#[test]
+fn Route_PingAcrossRouter_ReceiveFrame() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut i1 = Ipv4Interface::new(
+        mac_addr!(1),
+        [192, 168, 1, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 1, 1]),
+    );
+    let mut i2 = Ipv4Interface::new(
+        mac_addr!(2),
+        [192, 168, 2, 2],
+        [255, 255, 255, 0],
+        Some([192, 168, 2, 1]),
+    );
+    let mut r1 = Router::from_seed(3);
+
+    r1.enable_interface(0, i1.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.connect(0, &mut i1);
+
+    r1.enable_interface(1, i2.default_gateway.unwrap(), [255, 255, 255, 0]);
+    r1.connect(1, &mut i2);
+
+    sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
+    sim.adds(r1.ports());
+
+    // Act
+    i1.send_icmp(i2.ip_address, IcmpType::EchoRequest).unwrap(); // ---- i1 -> r (arp)
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    i1.receive(); // ---- i1 -> r (send)
+    sim.transmit();
+
+    r1.route(); // ---- r -> i2 (arp)
+    sim.transmit();
+
+    i2.receive();
+    sim.transmit();
+
+    r1.route(); // ---- r -> i2 send
+    sim.transmit();
+
+    i2.receive();
+    sim.transmit();
+
+    r1.route();
+    sim.transmit();
+
+    let i1_data = i1.receive();
+
+    // Assert
+    assert_eq!(i1_data.len(), 1);
+    assert_eq!(
+        i1_data[0],
+        Ipv4Frame::new(
+            i2.ip_address,
+            i1.ip_address,
+            63,
+            IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
+            true
+        )
     );
 }

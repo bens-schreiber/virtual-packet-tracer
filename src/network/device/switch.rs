@@ -112,6 +112,7 @@ impl Switch {
             .connect(interface);
     }
 
+    #[cfg(test)]
     /// Shorthand for connecting two switches ports together via EthernetPorts (bi-directional).
     /// * `port_id` - The port on this switch to connect.
     /// * `other_switch` - The other switch to connect to.
