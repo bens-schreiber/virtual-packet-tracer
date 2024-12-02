@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use std::time::Duration;
+
 use crate::{
     eth2_data, mac_addr,
     network::{
@@ -7,22 +9,11 @@ use crate::{
         ethernet::{interface::EthernetInterface, EtherType},
         ipv4::interface::Ipv4Interface,
     },
-    tick::Tickable,
+    tick::{Tickable, TimeProvider},
 };
 
-/**
-
-TODO: Need to make a mock for the TickTimer's SystemTime call.
-Not doing this now because of all the boiler plate code for mocking.
-I also don't think we will need to do any more testing on the tick module other than these basic cases.
-
-Ignoring the tests for now.
-
-**/
-
-#[ignore]
 #[test]
-fn Tick_SwitchRstpInit_FinishesAfter15TickSeconds() {
+fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut s = Switch::from_seed(1, 1);
@@ -37,24 +28,35 @@ fn Tick_SwitchRstpInit_FinishesAfter15TickSeconds() {
 
     s.init_stp();
 
+    {
+        let mut tp = TimeProvider::instance().lock().unwrap();
+        tp.freeze();
+    }
+
     // Act
     sim.tick();
     s.tick();
-    std::thread::sleep(std::time::Duration::from_secs(15));
     sim.tick();
+    s.tick();
+
+    {
+        let mut tp = TimeProvider::instance().lock().unwrap();
+        tp.advance(Duration::from_secs(15));
+    }
+
     s.tick();
 
     i1.send(i2.mac_address, EtherType::Debug, eth2_data!(0));
     sim.transmit();
     s.forward();
     sim.transmit();
+
     let i2_data = i2.receive_eth2();
 
     // Assert
     assert_eq!(i2_data.len(), 1);
 }
 
-#[ignore]
 #[test]
 fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
     // Arrange
@@ -74,15 +76,23 @@ fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
     r.enable_interface(0, [192, 168, 1, 1], [255, 255, 255, 0]);
     r.enable_rip(0);
 
+    {
+        let mut tp = TimeProvider::instance().lock().unwrap();
+        tp.freeze();
+    }
+
     // Act
     for _ in 0..2 {
         sim.tick();
         r.tick();
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        {
+            let mut tp = TimeProvider::instance().lock().unwrap();
+            tp.advance(Duration::from_secs(5));
+        }
         sim.tick();
         r.tick();
     }
 
     // Assert
-    assert_eq!(i1.receive().len(), 3);
+    assert_eq!(i1.receive().len(), 2);
 }

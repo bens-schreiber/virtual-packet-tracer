@@ -1,6 +1,71 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
+
+/// Provides an interface to freeze and manipulate time.
+pub struct TimeProvider {
+    frozen: Option<SystemTime>,
+    offset: Duration,
+    last_unfrozen: SystemTime,
+}
+
+impl TimeProvider {
+    /// A singleton instance of TimeProvider.
+    /// Really, I just don't want to pass the instance around everywhere and I'm definitely not going to make a DI container.
+    pub fn instance() -> &'static Mutex<Self> {
+        static INSTANCE: OnceLock<Mutex<TimeProvider>> = OnceLock::new();
+        INSTANCE.get_or_init(|| Mutex::new(TimeProvider::new()))
+    }
+
+    pub fn new() -> Self {
+        TimeProvider {
+            frozen: None,
+            offset: Duration::ZERO,
+            last_unfrozen: SystemTime::now(),
+        }
+    }
+
+    /// Freezes the current time.
+    /// This will cause the TimeProvider to return the same time until `unfreeze` is called.
+    pub fn freeze(&mut self) {
+        if self.frozen.is_some() {
+            panic!("TimeProvider is already frozen");
+        }
+
+        self.frozen = Some(self.now());
+    }
+
+    pub fn unfreeze(&mut self) {
+        if self.frozen.is_none() {
+            panic!("TimeProvider is not frozen");
+        }
+
+        if let Some(frozen_time) = self.frozen {
+            self.offset += frozen_time.duration_since(self.last_unfrozen).unwrap();
+        }
+
+        self.frozen = None;
+        self.last_unfrozen = SystemTime::now();
+    }
+
+    /// Advances the current frozen time by the given duration.
+    pub fn advance(&mut self, duration: Duration) {
+        if self.frozen.is_none() {
+            panic!("TimeProvider is not frozen");
+        }
+
+        self.frozen = Some(self.frozen.unwrap() + duration);
+    }
+
+    /// Returns the time. Not accurate to SystemTime::now(), considers frozen time and offset.
+    pub fn now(&self) -> SystemTime {
+        match self.frozen {
+            Some(frozen_time) => frozen_time,
+            None => SystemTime::now() + self.offset,
+        }
+    }
+}
 
 pub trait Tickable {
     fn tick(&mut self);
@@ -23,8 +88,13 @@ impl<T: Eq + Hash + Clone> TickTimer<T> {
     /// * `interval` - The interval in seconds to wait before the key is ready.
     /// * `persist` - If the key should persist after it is ready.
     pub fn schedule(&mut self, key: T, interval_in_seconds: u64, persist: bool) {
+        let now = {
+            let tp = TimeProvider::instance().lock().unwrap();
+            tp.now()
+        };
+
         if None == self.map.get(&key) {
-            let time_to_ready = SystemTime::now() + Duration::new(interval_in_seconds, 0);
+            let time_to_ready = now + Duration::new(interval_in_seconds, 0);
             self.map.insert(
                 key,
                 (
@@ -38,9 +108,14 @@ impl<T: Eq + Hash + Clone> TickTimer<T> {
 
     /// Returns a list of keys that are ready to be processed.
     pub fn ready(&self) -> Vec<T> {
+        let now = {
+            let tp = TimeProvider::instance().lock().unwrap();
+            tp.now()
+        };
+
         let mut ready = vec![];
         for (key, (time_ready, _, _)) in self.map.iter() {
-            if *time_ready <= SystemTime::now() {
+            if *time_ready <= now {
                 ready.push(key.clone());
             }
         }
@@ -51,17 +126,22 @@ impl<T: Eq + Hash + Clone> TickTimer<T> {
 
 impl<T: Eq + Hash + Clone> Tickable for TickTimer<T> {
     fn tick(&mut self) {
+        let now = {
+            let tp = TimeProvider::instance().lock().unwrap();
+            tp.now()
+        };
+
         self.map
-            .retain(|_, (time_until, _, persist)| *time_until > SystemTime::now() || *persist);
+            .retain(|_, (time_until, _, persist)| *time_until > now || *persist);
 
         for (_, (time_ready, interval_in_seconds, persist)) in self.map.iter_mut() {
-            if *time_ready < SystemTime::now() {
+            if *time_ready < now {
                 continue;
             }
             if !*persist {
                 continue;
             }
-            *time_ready = SystemTime::now() + *interval_in_seconds;
+            *time_ready = now + *interval_in_seconds;
         }
     }
 }
