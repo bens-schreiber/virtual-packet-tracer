@@ -134,7 +134,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
             return;
         }
         GuiMode::Drag => {
-            if GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
+            if !s.drag_device.is_some() || GUI_CONTROLS_PANEL.check_collision_point_rec(mouse_pos) {
                 s.mode = s.drag_prev_mode;
                 rl.gui_unlock();
                 return;
@@ -145,7 +145,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
                 rl.gui_unlock();
                 return;
             }
-            let e = es.get_mut(s.drag_device);
+            let e = es.get_mut(s.drag_device.unwrap());
             e.set_pos(mouse_pos - s.drag_origin);
             return;
         }
@@ -161,9 +161,10 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
                     Some(DeviceKind::Switch) => {
                         es.add_switch(mouse_pos);
                     }
-                    _ => {
-                        todo!()
+                    Some(DeviceKind::Router) => {
+                        es.add_router(mouse_pos);
                     }
+                    None => {}
                 }
                 return;
             }
@@ -173,7 +174,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
                     s.mode = GuiMode::Drag;
                     s.drag_prev_mode = GuiMode::Place;
                     rl.gui_lock();
-                    s.drag_device = e.id();
+                    s.drag_device = Some(e.id());
                     s.drag_origin = mouse_pos - e.pos();
                 }
                 return;
@@ -185,7 +186,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
                     s.mode = GuiMode::Drag;
                     s.drag_prev_mode = GuiMode::Select;
                     rl.gui_lock();
-                    s.drag_device = e.id();
+                    s.drag_device = Some(e.id());
                     s.drag_origin = mouse_pos - e.pos();
                 }
                 return;
@@ -196,8 +197,9 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
 }
 
 fn draw_connections(d: &mut RaylibDrawHandle, es: &Entities) {
-    for e in es.iter() {
-        for (adj_id, _) in es.adj_list.get(&e.id()).or(Some(&vec![])).unwrap() {
+    for (id, adjs) in es.adj_list.iter() {
+        let e = es.get(*id);
+        for (_, adj_id, _) in adjs {
             let target = es.get(*adj_id).pos();
             d.draw_line_ex(
                 Vector2::new(e.pos().x, e.pos().y),
@@ -446,10 +448,10 @@ struct GuiState {
     place_type: Option<DeviceKind>,
 
     drag_prev_mode: GuiMode,
-    drag_device: EntityId,
+    drag_device: Option<EntityId>,
     drag_origin: Vector2,
 
-    remove_d: Option<(usize, EntityId)>,
+    remove_d: Option<(usize, EntityId)>, // (port, id)
 
     connect_d1: Option<(usize, EntityId)>,
     connect_d2: Option<(usize, EntityId)>,
@@ -469,7 +471,7 @@ impl Default for GuiState {
             place_type: None,
 
             drag_prev_mode: GuiMode::Select,
-            drag_device: 0,
+            drag_device: None,
             drag_origin: Vector2::zero(),
 
             remove_d: None,

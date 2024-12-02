@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use raylib::{
     color::Color,
@@ -10,13 +10,36 @@ use raylib::{
 };
 
 use crate::{
-    network::device::{cable::CableSimulator, desktop::Desktop, switch::Switch},
+    network::device::{
+        cable::{CableSimulator, EthernetPort},
+        desktop::Desktop,
+        router::Router,
+        switch::Switch,
+    },
     tick::Tickable,
 };
 
-use super::{terminal::DesktopTerminal, utils, GuiMode, GuiState};
+use super::{
+    terminal::{DesktopTerminal, RouterTerminal},
+    utils, GuiMode, GuiState,
+};
 
-pub type EntityId = u32;
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub enum EntityId {
+    Desktop(u32),
+    Switch(u32),
+    Router(u32),
+}
+
+impl EntityId {
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            EntityId::Desktop(id) => *id,
+            EntityId::Switch(id) => *id,
+            EntityId::Router(id) => *id,
+        }
+    }
+}
 
 pub trait Entity: Tickable {
     fn render_entity(&self, d: &mut RaylibDrawHandle);
@@ -35,22 +58,19 @@ pub trait Entity: Tickable {
     fn bounding_box(&self) -> Rectangle;
 }
 
-enum ComponentMapping {
-    Desktop(usize),
-    Switch(usize),
-}
-
 pub struct Entities {
     desktops: Vec<DesktopEntity>,
     switches: Vec<SwitchEntity>,
+    routers: Vec<RouterEntity>,
 
     desktop_count: usize, // label purposes
     switch_count: usize,
+    router_count: usize,
 
-    pub adj_list: HashMap<EntityId, Vec<(EntityId, usize)>>, // Id -> (Adj Id, Port)
+    pub adj_list: HashMap<EntityId, Vec<(usize, EntityId, usize)>>, // Id -> (Self Port, Adjacent Id, Adjacent Port)
 
-    map: HashMap<EntityId, ComponentMapping>,
-    seed: EntityId,
+    map: HashMap<EntityId, usize>,
+    seed: u32,
     cable_sim: CableSimulator,
 }
 
@@ -59,20 +79,22 @@ impl Entities {
         Self {
             desktops: Vec::new(),
             switches: Vec::new(),
+            routers: Vec::new(),
             desktop_count: 0,
             switch_count: 0,
+            router_count: 0,
             adj_list: HashMap::new(),
             map: HashMap::new(),
-            seed: 0,
+            seed: 1,
             cable_sim: CableSimulator::new(),
         }
     }
 
     pub fn add_desktop(&mut self, pos: Vector2) -> EntityId {
-        let id = self.seed;
+        let id = EntityId::Desktop(self.seed);
         self.seed += 1;
-        self.map
-            .insert(id, ComponentMapping::Desktop(self.desktops.len()));
+
+        self.map.insert(id, self.desktops.len());
         self.adj_list.insert(id, Vec::new());
         self.desktops.push(DesktopEntity::new(
             id,
@@ -88,32 +110,53 @@ impl Entities {
                 .ethernet
                 .port(),
         );
+
         self.desktop_count += 1;
         id
     }
 
     pub fn add_switch(&mut self, pos: Vector2) -> EntityId {
-        let id = self.seed;
-        self.seed += 1;
-        self.map
-            .insert(id, ComponentMapping::Switch(self.switches.len()));
+        let id = EntityId::Switch(self.seed);
+        self.seed += 33;
+
+        self.map.insert(id, self.switches.len());
         self.adj_list.insert(id, Vec::new());
         self.switches.push(SwitchEntity::new(
             id,
             pos,
             format!("Switch {}", self.switch_count),
         ));
+
         self.cable_sim
             .adds(self.switches.last().unwrap().switch.ports());
         self.switch_count += 1;
         id
     }
 
+    pub fn add_router(&mut self, pos: Vector2) -> EntityId {
+        let id = EntityId::Router(self.seed);
+        self.seed += 9;
+
+        self.map.insert(id, self.routers.len());
+        self.adj_list.insert(id, Vec::new());
+        self.routers.push(RouterEntity::new(
+            id,
+            pos,
+            format!("Router {}", self.router_count),
+        ));
+
+        self.cable_sim
+            .adds(self.routers.last().unwrap().router.ports());
+        self.router_count += 1;
+        id
+    }
+
     pub fn update(&mut self) {
-        let mut delete = vec![];
+        let mut lazy_delete = vec![];
+
         for (i, desktop) in self.desktops.iter_mut().enumerate() {
             if desktop.is_deleted() {
-                delete.push((i, desktop.id));
+                lazy_delete.push((i, desktop.id));
                 continue;
             }
             desktop.tick();
@@ -121,46 +164,66 @@ impl Entities {
 
         for (i, switch) in self.switches.iter_mut().enumerate() {
             if switch.is_deleted() {
-                delete.push((i, switch.id));
+                lazy_delete.push((i, switch.id));
                 continue;
             }
             switch.tick();
         }
 
-        // Lazy delete
-        for i in 0..delete.len() {
-            let (e_i, id) = delete[i];
+        for (i, router) in self.routers.iter_mut().enumerate() {
+            if router.is_deleted() {
+                lazy_delete.push((i, router.id));
+                continue;
+            }
+            router.tick();
+        }
 
-            let mut adj_to_modify = vec![];
-            if let Some(adj_list) = self.adj_list.get(&id) {
-                for (adj_id, port) in adj_list.iter() {
-                    adj_to_modify.push((*adj_id, *port));
+        let mut removed: HashSet<EntityId> = HashSet::new();
+        for (i, id) in lazy_delete {
+            let adj_list = self.adj_list.remove(&id).unwrap();
+
+            // Remove from adj list
+            for (_, adj_id, _) in adj_list {
+                if removed.contains(&adj_id) {
+                    continue;
                 }
+
+                self.adj_list
+                    .get_mut(&adj_id)
+                    .unwrap()
+                    .retain(|(_, adj_id, _)| *adj_id != id);
+                removed.insert(adj_id);
             }
 
-            for (adj_id, _) in adj_to_modify {
-                if let Some(adj_list) = self.adj_list.get_mut(&adj_id) {
-                    match self.map.get(&id).unwrap() {
-                        ComponentMapping::Desktop(i) => {
-                            self.desktops[*i].desktop.interface.disconnect();
-                            self.cable_sim
-                                .remove(self.desktops[*i].desktop.interface.ethernet.port());
-                        }
-                        ComponentMapping::Switch(_) => {}
+            removed.clear();
+
+            // Remove from entity list and sim
+            match id {
+                EntityId::Desktop(_) => {
+                    self.cable_sim
+                        .remove(self.desktops[i].desktop.interface.ethernet.port());
+                    self.desktops.swap_remove(i);
+
+                    if i < self.desktops.len() {
+                        self.map.insert(self.desktops[i].id, i);
                     }
-                    adj_list.retain(|(id_, _)| *id_ != id); // Remove from adj list
                 }
-            }
+                EntityId::Switch(_) => {
+                    self.cable_sim.removes(self.switches[i].switch.ports());
+                    self.switches.swap_remove(i);
 
-            // Delete entity, swap it's place with the last entity
-            self.map.remove(&id);
-            self.adj_list.remove(&id);
-            self.desktops.swap_remove(e_i);
+                    if i < self.switches.len() {
+                        self.map.insert(self.switches[i].id, i);
+                    }
+                }
+                EntityId::Router(_) => {
+                    self.cable_sim.removes(self.routers[i].router.ports());
+                    self.routers.swap_remove(i);
 
-            // If a swap was made, update the swapped entity's index
-            if e_i < self.desktops.len() {
-                self.map
-                    .insert(self.desktops[e_i].id, ComponentMapping::Desktop(e_i));
+                    if i < self.routers.len() {
+                        self.map.insert(self.routers[i].id, i);
+                    }
+                }
             }
         }
 
@@ -173,6 +236,10 @@ impl Entities {
         }
 
         for e in self.switches.iter() {
+            e.render_entity(d);
+        }
+
+        for e in self.routers.iter() {
             e.render_entity(d);
         }
 
@@ -193,6 +260,14 @@ impl Entities {
             e.render_gui(d, s);
         }
 
+        for e in self.routers.iter_mut() {
+            if s.selected_window == Some(e.id) {
+                selected_window = Some(e);
+                continue;
+            }
+            e.render_gui(d, s);
+        }
+
         // Selected window is on top
         if let Some(e) = selected_window {
             e.render_gui(d, s);
@@ -200,16 +275,20 @@ impl Entities {
     }
 
     pub fn get(&self, id: EntityId) -> &dyn Entity {
-        match self.map.get(&id).unwrap() {
-            ComponentMapping::Desktop(i) => &self.desktops[*i],
-            ComponentMapping::Switch(i) => &self.switches[*i],
+        let i = *self.map.get(&id).unwrap();
+        match id {
+            EntityId::Desktop(_) => &self.desktops[i],
+            EntityId::Switch(_) => &self.switches[i],
+            EntityId::Router(_) => &self.routers[i],
         }
     }
 
     pub fn get_mut(&mut self, id: EntityId) -> &mut dyn Entity {
-        match self.map.get(&id).unwrap() {
-            ComponentMapping::Desktop(i) => &mut self.desktops[*i],
-            ComponentMapping::Switch(i) => &mut self.switches[*i],
+        let i = *self.map.get(&id).unwrap();
+        match id {
+            EntityId::Desktop(_) => &mut self.desktops[i],
+            EntityId::Switch(_) => &mut self.switches[i],
+            EntityId::Router(_) => &mut self.routers[i],
         }
     }
 
@@ -219,6 +298,7 @@ impl Entities {
             .iter()
             .map(|e| e as &dyn Entity)
             .chain(self.switches.iter().map(|e| e as &dyn Entity))
+            .chain(self.routers.iter().map(|e| e as &dyn Entity))
             .collect();
         res.into_iter()
     }
@@ -229,130 +309,157 @@ impl Entities {
             .iter_mut()
             .map(|e| e as &mut dyn Entity)
             .chain(self.switches.iter_mut().map(|e| e as &mut dyn Entity))
+            .chain(self.routers.iter_mut().map(|e| e as &mut dyn Entity))
             .collect();
         res.into_iter()
     }
 
     pub fn disconnect(&mut self, id: EntityId, port: usize) {
-        if self.adj_list.get(&id).is_none() || self.adj_list.get(&id).is_some_and(|l| l.is_empty())
-        {
-            return;
+        fn _dc(es: &mut Entities, id: EntityId, i: usize, port: usize) {
+            match id {
+                EntityId::Desktop(_) => {
+                    es.desktops[i].desktop.interface.disconnect();
+                }
+                EntityId::Switch(_) => {
+                    es.switches[i].switch.disconnect(port);
+                }
+                EntityId::Router(_) => {
+                    es.routers[i].router.disconnect(port);
+                }
+            }
         }
 
-        // Extract the adjacency list entry for the given id
-        let adj_list = self.adj_list.get(&id).unwrap().clone();
-        let (adj_entity, adj_id, adj_port) = {
-            if let Some((adj_id, _)) = adj_list.iter().find(|(_, p)| *p == port) {
-                let adj_entity = self.map.get(adj_id).unwrap();
-                let (_, adj_port) = self
-                    .adj_list
-                    .get(adj_id)
-                    .unwrap()
-                    .iter()
-                    .find(|(id_, _)| *id_ == id)
-                    .unwrap();
-                (adj_entity, *adj_id, *adj_port)
-            } else {
-                return;
-            }
+        let e1_id = id;
+        let e1_adjacency = {
+            let adj_list = self.adj_list.get(&e1_id);
+            adj_list.and_then(|adj| adj.iter().find(|(p, _, _)| *p == port).cloned())
         };
 
-        // Disconnect adjancent entity.
-        match adj_entity {
-            ComponentMapping::Desktop(i) => {
-                self.desktops[*i].desktop.interface.disconnect();
+        if let Some((e1_port, e2_id, e2_port)) = e1_adjacency {
+            if let Some(adj) = self.adj_list.get_mut(&e1_id) {
+                adj.retain(|(p, _, _)| *p != e1_port);
             }
-            ComponentMapping::Switch(i) => {
-                self.switches[*i].switch.disconnect(adj_port);
+            if let Some(adj) = self.adj_list.get_mut(&e2_id) {
+                adj.retain(|(p, _, _)| *p != e2_port);
             }
-        }
 
-        // Remove the adjacency list entry for the given id
-        self.adj_list
-            .get_mut(&adj_id)
-            .unwrap()
-            .retain(|(_, p)| *p != adj_port);
-        self.adj_list
-            .get_mut(&id)
-            .unwrap()
-            .retain(|(_, p)| *p != port);
+            _dc(self, e1_id, *self.map.get(&e1_id).unwrap(), e1_port);
+            _dc(self, e2_id, *self.map.get(&e2_id).unwrap(), e2_port);
+            return;
+        }
     }
 
     pub fn connect(&mut self, e1: EntityId, p1: usize, e2: EntityId, p2: usize) {
+        if e1 == e2 {
+            return;
+        }
+
         self.disconnect(e1, p1);
         self.disconnect(e2, p2);
 
-        let e1_cm = self.map.get(&e1).unwrap();
-        let e2_cm = self.map.get(&e2).unwrap();
+        let e1_i = *self.map.get(&e1).unwrap();
+        let e2_i = *self.map.get(&e2).unwrap();
 
-        // TODO: this is a mess
-        match (e1_cm, e2_cm) {
-            (ComponentMapping::Desktop(i1), ComponentMapping::Desktop(i2)) => {
-                if i1 == i2 {
-                    return;
+        fn connect_desktop_entity(
+            es: &mut Entities,
+            e_i: usize,
+            other_port: usize,
+            other_id: EntityId,
+            other_i: usize,
+        ) {
+            let e = &mut es.desktops[e_i];
+            match other_id {
+                EntityId::Desktop(_) => {
+                    EthernetPort::connect(
+                        &mut e.desktop.interface.ethernet.port(),
+                        &mut es.desktops[other_i].desktop.interface.ethernet.port(),
+                    );
                 }
-
-                // compiler gymnastics
-                let (left, right) = if i1 < i2 {
-                    let (left, right) = self.desktops.split_at_mut(*i2);
-                    (&mut left[*i1], &mut right[0])
-                } else {
-                    let (left, right) = self.desktops.split_at_mut(*i1);
-                    (&mut right[0], &mut left[*i2])
-                };
-
-                self.adj_list
-                    .get_mut(&left.id)
-                    .unwrap()
-                    .push((right.id, p1));
-                self.adj_list
-                    .get_mut(&right.id)
-                    .unwrap()
-                    .push((left.id, p2));
-
-                left.desktop.interface.connect(&mut right.desktop.interface);
-            }
-            (ComponentMapping::Switch(i1), ComponentMapping::Switch(i2)) => {
-                if i1 == i2 {
-                    return;
+                EntityId::Switch(_) => {
+                    es.switches[other_i]
+                        .switch
+                        .connect(other_port, &mut e.desktop.interface.ethernet);
                 }
-
-                // compiler gymnastics
-                let (left, right) = if i1 < i2 {
-                    let (left, right) = self.switches.split_at_mut(*i2);
-                    (&mut left[*i1], &mut right[0])
-                } else {
-                    let (left, right) = self.switches.split_at_mut(*i1);
-                    (&mut right[0], &mut left[*i2])
-                };
-
-                self.adj_list
-                    .get_mut(&left.id)
-                    .unwrap()
-                    .push((right.id, p1));
-                self.adj_list
-                    .get_mut(&right.id)
-                    .unwrap()
-                    .push((left.id, p2));
-
-                left.switch.connect_switch(p1, &mut right.switch, p2);
+                EntityId::Router(_) => {
+                    es.routers[other_i]
+                        .router
+                        .connect(other_port, &mut e.desktop.interface);
+                }
             }
-            (ComponentMapping::Desktop(i), ComponentMapping::Switch(j)) => {
-                let (d, sw) = (&mut self.desktops[*i], &mut self.switches[*j]);
-                self.adj_list.get_mut(&d.id).unwrap().push((sw.id, p1));
-                self.adj_list.get_mut(&sw.id).unwrap().push((d.id, p2));
-
-                sw.switch.connect(p2, &mut d.desktop.interface.ethernet);
-            }
-            (ComponentMapping::Switch(i), ComponentMapping::Desktop(j)) => {
-                let (sw, d) = (&mut self.switches[*i], &mut self.desktops[*j]);
-                self.adj_list.get_mut(&d.id).unwrap().push((sw.id, p2));
-                self.adj_list.get_mut(&sw.id).unwrap().push((d.id, p1));
-
-                sw.switch.connect(p1, &mut d.desktop.interface.ethernet);
-            }
-            _ => {}
         }
+
+        fn connect_switch_entity(
+            es: &mut Entities,
+            e_i: usize,
+            port: usize,
+            other_port: usize,
+            other_id: EntityId,
+            other_i: usize,
+        ) {
+            let e = &mut es.switches[e_i];
+            match other_id {
+                EntityId::Desktop(_) => {
+                    e.switch
+                        .connect(port, &mut es.desktops[other_i].desktop.interface.ethernet);
+                }
+                EntityId::Switch(_) => {
+                    EthernetPort::connect(
+                        &mut e.switch.ports()[port],
+                        &mut es.switches[other_i].switch.ports()[other_port],
+                    );
+                }
+                EntityId::Router(_) => {
+                    EthernetPort::connect(
+                        &mut e.switch.ports()[port],
+                        &mut es.routers[other_i].router.ports()[other_port],
+                    );
+                }
+            }
+        }
+
+        fn connect_router_entity(
+            es: &mut Entities,
+            e_i: usize,
+            port: usize,
+            other_port: usize,
+            other_id: EntityId,
+            other_i: usize,
+        ) {
+            let e = &mut es.routers[e_i];
+            match other_id {
+                EntityId::Desktop(_) => {
+                    e.router
+                        .connect(port, &mut es.desktops[other_i].desktop.interface);
+                }
+                EntityId::Switch(_) => {
+                    EthernetPort::connect(
+                        &mut e.router.ports()[port],
+                        &mut es.switches[other_i].switch.ports()[other_port],
+                    );
+                }
+                EntityId::Router(_) => {
+                    EthernetPort::connect(
+                        &mut e.router.ports()[port],
+                        &mut es.routers[other_i].router.ports()[other_port],
+                    );
+                }
+            }
+        }
+
+        match e1 {
+            EntityId::Desktop(_) => {
+                connect_desktop_entity(self, e1_i, p2, e2, e2_i);
+            }
+            EntityId::Switch(_) => {
+                connect_switch_entity(self, e1_i, p1, p2, e2, e2_i);
+            }
+            EntityId::Router(_) => {
+                connect_router_entity(self, e1_i, p1, p2, e2, e2_i);
+            }
+        }
+
+        self.adj_list.get_mut(&e1).unwrap().push((p1, e2, p2));
+        self.adj_list.get_mut(&e2).unwrap().push((p2, e1, p1));
     }
 }
 
@@ -369,6 +476,9 @@ struct DropdownGuiState {
     scroll_index: i32,
 }
 
+// Desktop Entity
+// ----------------------------------------------
+
 struct DesktopEditGuiState {
     open: bool,
     pos: Vector2,
@@ -379,6 +489,9 @@ struct DesktopEditGuiState {
 
     subnet_buffer: [u8; 15],
     subnet_edit_mode: bool,
+
+    default_gateway_buffer: [u8; 15],
+    default_gateway_edit_mode: bool,
 
     cmd_line_buffer: [u8; 0xFF],
     cmd_line_out: VecDeque<String>,
@@ -410,13 +523,15 @@ impl DesktopEditGuiState {
             ip_edit_mode: false,
             subnet_buffer,
             subnet_edit_mode: false,
+            default_gateway_buffer: [0u8; 15],
+            default_gateway_edit_mode: false,
             cmd_line_buffer: [0u8; 0xFF],
             cmd_line_out: VecDeque::new(),
         }
     }
 
     pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 300.0, 200.0)
+        Rectangle::new(self.pos.x, self.pos.y, 300.0, 230.0)
     }
 
     pub fn tab_bounds(&self) -> Rectangle {
@@ -441,7 +556,7 @@ struct DesktopEntity {
 
 impl DesktopEntity {
     fn new(id: EntityId, pos: Vector2, label: String) -> Self {
-        let desktop = Desktop::from_seed(id as u64);
+        let desktop = Desktop::from_seed(id.as_u32() as u64);
         let display_gui =
             DesktopEditGuiState::new(desktop.interface.ip_address, desktop.interface.subnet_mask);
         Self {
@@ -576,13 +691,44 @@ impl Entity for DesktopEntity {
                 ds.subnet_edit_mode,
             ) {
                 ds.subnet_edit_mode = !ds.subnet_edit_mode;
+                match utils::array_to_string(&ds.ip_buffer).parse::<std::net::Ipv4Addr>() {
+                    Ok(ip) => {
+                        self.desktop.interface.subnet_mask = ip.octets();
+                    }
+                    _ => {}
+                }
+            }
+            //----------------------------------------------
+
+            // Configure Default Gateway
+            //----------------------------------------------
+            d.gui_label(
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 90.0, 100.0, 20.0),
+                Some(rstr!("Default Gateway")),
+            );
+
+            if d.gui_text_box(
+                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 90.0, 150.0, 20.0),
+                &mut ds.default_gateway_buffer,
+                ds.default_gateway_edit_mode,
+            ) {
+                ds.default_gateway_edit_mode = !ds.default_gateway_edit_mode;
+                match utils::array_to_string(&ds.default_gateway_buffer)
+                    .parse::<std::net::Ipv4Addr>()
+                {
+                    Ok(ip) => {
+                        self.desktop.interface.default_gateway = Some(ip.octets());
+                    }
+                    _ => {}
+                }
             }
             //----------------------------------------------
 
             // Command Line
             //----------------------------------------------
+            let terminal_starting_y = ds.pos.y + 115.0;
             d.draw_rectangle_rec(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 85.0, 280.0, 105.0),
+                Rectangle::new(ds.pos.x + 10.0, terminal_starting_y, 280.0, 105.0),
                 Color::BLACK,
             );
 
@@ -633,7 +779,8 @@ impl Entity for DesktopEntity {
                 Color::WHITE.color_to_int(),
             );
 
-            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + ds.pos.y + 93.0;
+            let out_starting_y = terminal_starting_y + 8.0;
+            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + out_starting_y;
             if !self.terminal.channel_open {
                 d.draw_text(
                     "Desktop %",
@@ -648,7 +795,10 @@ impl Entity for DesktopEntity {
                 && d.gui_text_box(
                     Rectangle::new(ds.pos.x + 70.0, out_y - 5.0, 210.0, 20.0),
                     &mut ds.cmd_line_buffer,
-                    !ds.ip_edit_mode && !ds.subnet_edit_mode && s.selected_window == Some(self.id),
+                    !ds.ip_edit_mode
+                        && !ds.subnet_edit_mode
+                        && !ds.default_gateway_edit_mode
+                        && s.selected_window == Some(self.id),
                 )
                 && d.is_key_pressed(KeyboardKey::KEY_ENTER)
             {
@@ -673,12 +823,9 @@ impl Entity for DesktopEntity {
                 ds.cmd_line_out.push_back(out);
             }
 
-            let mut out_y = ds.pos.y + 93.0;
+            let mut out_y = out_starting_y;
             for line in ds.cmd_line_out.iter().rev().take(7).rev() {
                 d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
-                if out_y > ds.pos.y + 150.0 {
-                    break;
-                }
                 out_y += 11.0;
             }
             //----------------------------------------------
@@ -822,6 +969,10 @@ impl Tickable for DesktopEntity {
         self.desktop.tick();
     }
 }
+// ----------------------------------------------
+
+// Switch Entity
+// ----------------------------------------------
 
 struct SwitchEntity {
     id: EntityId,
@@ -835,7 +986,7 @@ struct SwitchEntity {
 
 impl SwitchEntity {
     fn new(id: EntityId, pos: Vector2, label: String) -> Self {
-        let switch = Switch::from_seed(id as u64, 0);
+        let switch = Switch::from_seed(id.as_u32() as u64, 0);
         Self {
             id,
             switch,
@@ -905,7 +1056,7 @@ impl Entity for SwitchEntity {
         );
     }
 
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
+    fn render_gui(&mut self, d: &mut RaylibDrawHandle, _: &mut GuiState) {
         if self.dropdown_gui.is_some() {
             let ds = self.dropdown_gui.as_mut().unwrap();
             match ds.kind {
@@ -1008,5 +1159,394 @@ impl Entity for SwitchEntity {
 impl Tickable for SwitchEntity {
     fn tick(&mut self) {
         self.switch.tick();
+    }
+}
+// ----------------------------------------------
+
+// Router Entity
+// ----------------------------------------------
+
+struct RouterEditGuiState {
+    open: bool,
+    pos: Vector2,
+    drag_origin: Option<Vector2>,
+
+    cmd_line_buffer: [u8; 0xFF],
+    cmd_line_out: VecDeque<String>,
+}
+
+impl RouterEditGuiState {
+    pub fn bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 300.0, 160.0)
+    }
+
+    pub fn tab_bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
+    }
+}
+
+struct RouterEntity {
+    id: EntityId,
+    router: Router,
+    pos: Vector2,
+    label: String,
+    deleted: bool,
+
+    dropdown_gui: Option<DropdownGuiState>,
+    edit_gui: RouterEditGuiState,
+    terminal: RouterTerminal,
+}
+
+impl RouterEntity {
+    fn new(id: EntityId, pos: Vector2, label: String) -> Self {
+        let router = Router::from_seed(id.as_u32() as u64);
+        Self {
+            id,
+            router,
+            pos,
+            label,
+            deleted: false,
+            dropdown_gui: None,
+            edit_gui: RouterEditGuiState {
+                open: false,
+                pos: Vector2::zero(),
+                drag_origin: None,
+                cmd_line_buffer: [0u8; 0xFF],
+                cmd_line_out: VecDeque::new(),
+            },
+            terminal: RouterTerminal::new(),
+        }
+    }
+}
+
+impl Entity for RouterEntity {
+    fn id(&self) -> EntityId {
+        self.id
+    }
+
+    fn set_pos(&mut self, pos: Vector2) {
+        self.pos = pos;
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+
+    fn pos(&self) -> Vector2 {
+        self.pos
+    }
+
+    fn gui_bounds(&self) -> Rectangle {
+        self.edit_gui.bounds()
+    }
+
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle::new(self.pos.x - 20.0, self.pos.y - 20.0, 40.0, 40.0)
+    }
+
+    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
+        self.dropdown_gui = Some(DropdownGuiState {
+            selection: -1,
+            pos,
+            kind,
+            bounds: Rectangle::new(pos.x, pos.y, 75.0, 16.0), // Contains at least one option
+            scroll_index: 0,
+        });
+        s.open_dropdown = Some(self.id);
+    }
+
+    fn render_entity(&self, d: &mut RaylibDrawHandle) {
+        d.draw_circle_v(self.pos, 25.0, Color::WHITE);
+        d.draw_circle_v(self.pos, 23.0, Color::BLACK);
+
+        utils::draw_icon(
+            GuiIconName::ICON_SHUFFLE_FILL,
+            self.pos.x as i32 - 15,
+            self.pos.y as i32 - 15,
+            2,
+            Color::WHITE,
+        );
+        d.draw_text(
+            &self.label,
+            self.pos.x as i32 - 30,
+            self.pos.y as i32 + 30,
+            15,
+            Color::WHITE,
+        );
+    }
+
+    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
+        if self.dropdown_gui.is_some() {
+            let ds = self.dropdown_gui.as_mut().unwrap();
+            match ds.kind {
+                DropdownKind::Edit => {
+                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
+                    d.gui_list_view(
+                        ds.bounds,
+                        Some(rstr!("Edit;Delete")),
+                        &mut ds.scroll_index,
+                        &mut ds.selection,
+                    );
+                }
+                DropdownKind::Connections => {
+                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 100.0, 200.5);
+
+                    let options = self
+                        .router
+                        .ports()
+                        .iter()
+                        .enumerate()
+                        .map(|(p, _)| format!("Gigabit0/{p}"))
+                        .collect::<Vec<String>>();
+
+                    d.gui_list_view(
+                        ds.bounds,
+                        Some(utils::rstr_from_string(options.join(";")).as_c_str()),
+                        &mut ds.scroll_index,
+                        &mut ds.selection,
+                    );
+                }
+            }
+        }
+
+        let mut render_display = |ds: &mut RouterEditGuiState, d: &mut RaylibDrawHandle| {
+            // Window
+            //----------------------------------------------
+            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+                && ds
+                    .bounds()
+                    .check_collision_point_rec(d.get_mouse_position())
+            {
+                s.selected_window = Some(self.id); // Window engaged
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
+            }
+
+            if d.gui_window_box(
+                ds.bounds(),
+                Some(utils::rstr_from_string(self.label.clone()).as_c_str()),
+            ) {
+                return true;
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+            }
+            //----------------------------------------------
+
+            // Command Line
+            //----------------------------------------------
+            d.draw_rectangle_rec(
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 40.0, 280.0, 105.0),
+                Color::BLACK,
+            );
+
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
+                Color::WHITE.color_to_int(),
+            );
+
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
+                Color::WHITE.color_to_int(),
+            );
+
+            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + ds.pos.y + 53.0;
+            if !self.terminal.channel_open {
+                d.draw_text(
+                    "Router %",
+                    ds.pos.x as i32 + 15,
+                    out_y as i32,
+                    10,
+                    Color::WHITE,
+                );
+            }
+
+            if !self.terminal.channel_open
+                && d.gui_text_box(
+                    Rectangle::new(ds.pos.x + 70.0, out_y - 5.0, 210.0, 20.0),
+                    &mut ds.cmd_line_buffer,
+                    s.selected_window == Some(self.id),
+                )
+                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
+            {
+                self.terminal.input(
+                    utils::array_to_string(&ds.cmd_line_buffer),
+                    &mut self.router,
+                );
+                ds.cmd_line_out.push_back(format!(
+                    "Router % {}",
+                    utils::array_to_string(&ds.cmd_line_buffer)
+                ));
+
+                if ds.cmd_line_out.len() > 8 {
+                    ds.cmd_line_out.pop_front();
+                }
+                ds.cmd_line_buffer = [0u8; 0xFF];
+            }
+            d.gui_load_style_default();
+
+            // Output
+            if let Some(out) = self.terminal.out() {
+                ds.cmd_line_out.push_back(out);
+            }
+
+            let mut out_y = ds.pos.y + 53.0;
+            for line in ds.cmd_line_out.iter().rev().take(7).rev() {
+                d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
+                if out_y > ds.pos.y + 150.0 {
+                    break;
+                }
+                out_y += 11.0;
+            }
+            //----------------------------------------------
+            return false;
+        };
+
+        if self.edit_gui.open {
+            if render_display(&mut self.edit_gui, d) {
+                s.open_windows.retain(|id| *id != self.id);
+                self.edit_gui.open = false;
+                return;
+            }
+
+            if self.edit_gui.drag_origin.is_some()
+                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
+            {
+                self.edit_gui.drag_origin = None;
+                return;
+            }
+
+            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+                if self.edit_gui.drag_origin.is_none()
+                    && self
+                        .edit_gui
+                        .tab_bounds()
+                        .check_collision_point_rec(d.get_mouse_position())
+                {
+                    self.edit_gui.drag_origin = Some(d.get_mouse_position() - self.edit_gui.pos);
+                }
+
+                if self.edit_gui.drag_origin.is_some() {
+                    self.edit_gui.pos = d.get_mouse_position() - self.edit_gui.drag_origin.unwrap();
+                }
+            }
+        }
+    }
+
+    fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
+        let mut handle_edit = |ds: &DropdownGuiState| {
+            // Handle dropdown clicked
+            match ds.selection {
+                // Edit
+                0 => {
+                    self.edit_gui.open = true;
+                    self.edit_gui.pos = rl.get_mouse_position();
+                    s.open_windows.push(self.id);
+                    return true;
+                }
+                // Delete
+                1 => {
+                    self.deleted = true;
+                    return true;
+                }
+                _ => {
+                    return false;
+                }
+            }
+        };
+
+        let mut handle_connections = |ds: &DropdownGuiState| {
+            if ds.selection == -1 {
+                return false;
+            }
+
+            let selection = ds.selection as usize;
+
+            match s.mode {
+                GuiMode::Connect => {
+                    if s.connect_d1.is_none() {
+                        s.connect_d1 = Some((selection, self.id));
+                    } else {
+                        s.connect_d2 = Some((selection, self.id));
+                    }
+                }
+                GuiMode::Remove => {
+                    s.remove_d = Some((selection, self.id));
+                }
+                _ => {}
+            }
+
+            return true;
+        };
+
+        if let Some(ds) = &self.dropdown_gui {
+            let close = match ds.kind {
+                DropdownKind::Edit => handle_edit(ds),
+                DropdownKind::Connections => handle_connections(ds),
+            };
+
+            if close {
+                s.open_dropdown = None;
+                self.dropdown_gui = None;
+                return false;
+            }
+
+            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
+                let mouse_pos = rl.get_mouse_position();
+                if !ds.bounds.check_collision_point_rec(mouse_pos) {
+                    s.open_dropdown = None;
+                    self.dropdown_gui = None;
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+}
+
+impl Tickable for RouterEntity {
+    fn tick(&mut self) {
+        self.router.tick();
     }
 }

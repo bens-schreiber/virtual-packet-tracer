@@ -62,7 +62,7 @@ impl WaitForArpResolveFrame {
     }
 }
 
-/// A layer 3 interface for IpV4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
+/// A layer 3 interface for Ipv4 actions, sending and receiving Ipv4Frames through an EthernetInterface.
 ///
 /// Contains an ARP table to map IP addresses to MAC addresses.
 ///
@@ -75,6 +75,7 @@ pub struct Ipv4Interface {
     pub default_gateway: Option<Ipv4Address>,
     arp_buf: Vec<WaitForArpResolveFrame>,
     arp_table: HashMap<Ipv4Address, MacAddress>,
+    router_interface: bool,
 }
 
 impl Ipv4Interface {
@@ -93,6 +94,19 @@ impl Ipv4Interface {
             default_gateway,
             arp_buf,
             arp_table,
+            router_interface: false,
+        }
+    }
+
+    /// Disables the default gateway, rerouting to itself.
+    pub fn router_interface(
+        mac_address: MacAddress,
+        ip_address: Ipv4Address,
+        subnet_mask: Ipv4Address,
+    ) -> Ipv4Interface {
+        Ipv4Interface {
+            router_interface: true,
+            ..Ipv4Interface::new(mac_address, ip_address, subnet_mask, None)
         }
     }
 
@@ -112,6 +126,7 @@ impl Ipv4Interface {
             default_gateway,
             arp_buf,
             arp_table,
+            router_interface: false,
         }
     }
 
@@ -154,7 +169,8 @@ impl Ipv4Interface {
     /// default gateway, resolving to the correct MAC address of the interface the router knows the destination is reachable through.
     ///
     /// # Returns
-    /// True if the address was found in the ARP table and the frame was sent, false otherwise.
+    /// True if the address was found in the ARP table and the frame was sent, false if buffering the frame.
+    /// Err if the destination is unreachable (no default gateway).
     pub fn sendv(
         &mut self,
         source: Ipv4Address,
@@ -163,12 +179,12 @@ impl Ipv4Interface {
         ttl: u8,
         data: Vec<u8>,
         icmp: bool,
-    ) -> bool {
+    ) -> Result<bool, &'static str> {
         if destination == localhost!() || destination == self.ip_address {
             let frame = Ipv4Frame::new(source, destination, ttl, data, icmp);
             self.ethernet
                 .send(self.ethernet.mac_address, EtherType::Ipv4, frame.to_bytes());
-            return true;
+            return Ok(true);
         }
 
         let key = if self._subnets_match(destination) {
@@ -177,15 +193,23 @@ impl Ipv4Interface {
             proxied_destination.or(self.default_gateway)
         };
 
+        let frame = Ipv4Frame::new(source, destination, ttl, data, icmp);
+
         if key.is_none() {
-            return false;
+            if self.router_interface {
+                // No default gateway, but we are a router interface, so we can send to ourselves
+                // for the router to check the routing table.
+                self.ethernet
+                    .send(self.ethernet.mac_address, EtherType::Ipv4, frame.to_bytes());
+                return Ok(true);
+            }
+            return Err("Destination is unreachable");
         }
 
-        let frame = Ipv4Frame::new(source, destination, ttl, data, icmp);
         if let Some(mac_address) = self.arp_table.get(&key.unwrap()) {
             self.ethernet
                 .send(*mac_address, EtherType::Ipv4, frame.to_bytes());
-            return true;
+            return Ok(true);
         }
 
         // Send an ARP request to find the MAC address of the target IP address
@@ -194,7 +218,7 @@ impl Ipv4Interface {
             .push(WaitForArpResolveFrame::new(key.unwrap(), frame));
         self.ethernet.arp_request(self.ip_address, key.unwrap());
 
-        false
+        Ok(false)
     }
 
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
@@ -211,8 +235,9 @@ impl Ipv4Interface {
     /// 2. The default gateway if the destination is on a different subnet.
     ///
     /// # Returns
-    /// True if the address was found in the ARP table and the frame was sent, false otherwise.
-    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> bool {
+    /// True if the address was found in the ARP table and the frame was sent, false if buffering the frame.
+    /// Err if the destination is unreachable (no default gateway).
+    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> Result<bool, &'static str> {
         self.sendv(self.ip_address, destination, None, 64, data, false)
     }
 
@@ -236,7 +261,11 @@ impl Ipv4Interface {
     ///
     /// # Remarks
     ///
-    pub fn send_icmp(&mut self, destination: Ipv4Address, kind: IcmpType) -> bool {
+    pub fn send_icmp(
+        &mut self,
+        destination: Ipv4Address,
+        kind: IcmpType,
+    ) -> Result<bool, &'static str> {
         let mut k = kind;
         if destination == localhost!() || destination == self.ip_address {
             k = IcmpType::EchoReply; // Ping self? Reply.
@@ -305,11 +334,14 @@ impl Ipv4Interface {
         // Passive arp table filling: Update the ARP table with the sender's MAC address
         self.arp_table.insert(frame.source, source_mac);
 
-        // On ICMP echo request, reply with an echo reply. Don't reply to self.
-        if source_mac != self.ethernet.mac_address && frame.protocol == 1 {
+        // On ICMP echo request, reply with an echo reply if we are the intended target. Don't reply to self.
+        if frame.destination == self.ip_address
+            && frame.source != self.ip_address
+            && frame.protocol == 1
+        {
             if let Ok(icmp_frame) = IcmpFrame::from_bytes(frame.data.clone()) {
                 if icmp_frame.icmp_type == 8 {
-                    self.send_icmp(frame.source, IcmpType::EchoReply);
+                    let _ = self.send_icmp(frame.source, IcmpType::EchoReply);
                     return;
                 }
             }
