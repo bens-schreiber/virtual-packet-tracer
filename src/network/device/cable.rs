@@ -145,9 +145,11 @@ impl EthernetPort {
         incoming
     }
 
-    /// Returns true if there are bytes in the incoming buffer.
-    #[cfg(test)]
-    pub(crate) fn has_outgoing(&self) -> bool {
+    pub fn has_outgoing(&self) -> bool {
         !self.outgoing_buffer.is_empty()
+    }
+
+    pub fn has_incoming(&self) -> bool {
+        !self.incoming_buffer.is_empty()
     }
 }

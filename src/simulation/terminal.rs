@@ -56,6 +56,7 @@ fn ping(t: &mut DesktopTerminal, d: &mut Desktop, args: &[&str]) {
 type DesktopTerminalCommand = fn(&mut DesktopTerminal, &mut Desktop, &[&str]) -> ();
 fn desktop_terminal_dict() -> HashMap<String, DesktopTerminalCommand> {
     let mut dict = HashMap::new();
+    dict.insert(String::from("help"), dhelp as DesktopTerminalCommand);
     dict.insert(String::from("ping"), ping as DesktopTerminalCommand);
     dict
 }
@@ -128,12 +129,15 @@ impl DesktopTerminal {
             Some(TerminalCommand::Ping) => {
                 // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
                 for frame in desktop.interface.receive() {
+                    if frame.destination != desktop.interface.ip_address {
+                        continue;
+                    }
+
                     if frame.protocol == 1 {
                         let icmp = match IcmpFrame::from_bytes(frame.data) {
                             Ok(icmp) => icmp,
                             Err(_) => {
-                                self.channel_open = false;
-                                return;
+                                continue;
                             }
                         };
 

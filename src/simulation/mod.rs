@@ -2,30 +2,37 @@ mod device;
 mod terminal;
 mod utils;
 
-use device::{DropdownKind, Entities, Entity, EntityId};
+use std::collections::HashMap;
+
+use device::{
+    DesktopDevice, Device, DeviceId, Devices, DropdownKind, PacketEntity, RouterDevice,
+    SwitchDevice,
+};
 use raylib::prelude::*;
 
-fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
+use crate::tick::TimeProvider;
+
+fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
     let mouse_pos = rl.get_mouse_position();
 
     if let Some(id) = s.open_dropdown {
-        let e = es.get_mut(id);
+        let e = ds.get_mut(id);
         if !e.handle_gui_click(rl, s) {
             return;
         }
     }
 
     if s.open_windows.iter().any(|id| {
-        let e = es.get(*id);
+        let e = ds.get_mut(*id);
         e.gui_bounds().check_collision_point_rec(mouse_pos)
     }) {
         return;
     }
 
     // todo: don't need to check this every frame, some lazy eval would be nice
-    let mouse_collision: Option<&mut dyn Entity> = {
+    let mouse_collision: Option<&mut dyn Device> = {
         let mut res = None;
-        for e in es.iter_mut().rev() {
+        for e in ds.iter_mut().rev() {
             if e.bounding_box().check_collision_point_rec(mouse_pos) {
                 res = Some(e);
                 break;
@@ -81,6 +88,27 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
             s.mode = GuiMode::Select;
             return;
         }
+
+        if TRACER_MODE_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.tracer_mode = !s.tracer_mode;
+
+            // Freeze or unfreeze time
+            if s.tracer_mode {
+                TimeProvider::instance().lock().unwrap().freeze();
+            } else {
+                TimeProvider::instance().lock().unwrap().unfreeze();
+            }
+            return;
+        }
+
+        if NEXT_TRACER_SELBOX.check_collision_point_rec(rl.get_mouse_position()) && s.tracer_mode {
+            TimeProvider::instance()
+                .lock()
+                .unwrap()
+                .advance(std::time::Duration::from_millis(33));
+            s.tracer_next = true;
+            return;
+        }
     }
 
     // Sim Controls
@@ -105,7 +133,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
             }
 
             let (port, id) = s.remove_d.unwrap();
-            es.disconnect(id, port);
+            ds.disconnect(id, port);
             s.remove_d = None;
             return;
         }
@@ -128,7 +156,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
 
             let (e1_port, e1_id) = s.connect_d1.unwrap();
             let (e2_port, e2_id) = s.connect_d2.unwrap();
-            es.connect(e1_id, e1_port, e2_id, e2_port);
+            ds.connect(e1_id, e1_port, e2_id, e2_port);
             s.connect_d1 = None;
             s.connect_d2 = None;
             return;
@@ -145,7 +173,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
                 rl.gui_unlock();
                 return;
             }
-            let e = es.get_mut(s.drag_device.unwrap());
+            let e = ds.get_mut(s.drag_device.unwrap());
             e.set_pos(mouse_pos - s.drag_origin);
             return;
         }
@@ -156,13 +184,13 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
             {
                 match s.place_type {
                     Some(DeviceKind::Desktop) => {
-                        es.add_desktop(mouse_pos);
+                        ds.add::<DesktopDevice>(mouse_pos);
                     }
                     Some(DeviceKind::Switch) => {
-                        es.add_switch(mouse_pos);
+                        ds.add::<SwitchDevice>(mouse_pos);
                     }
                     Some(DeviceKind::Router) => {
-                        es.add_router(mouse_pos);
+                        ds.add::<RouterDevice>(mouse_pos);
                     }
                     None => {}
                 }
@@ -196,11 +224,11 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, es: &mut Entities) {
     // ------------------------------------------------------
 }
 
-fn draw_connections(d: &mut RaylibDrawHandle, es: &Entities) {
-    for (id, adjs) in es.adj_list.iter() {
-        let e = es.get(*id);
+fn draw_connections(d: &mut RaylibDrawHandle, ds: &Devices) {
+    for (id, adjs) in ds.adj_devices.iter() {
+        let e = ds.get(*id);
         for (_, adj_id, _) in adjs {
-            let target = es.get(*adj_id).pos();
+            let target = ds.get(*adj_id).pos();
             d.draw_line_ex(
                 Vector2::new(e.pos().x, e.pos().y),
                 Vector2::new(target.x, target.y),
@@ -214,6 +242,9 @@ fn draw_connections(d: &mut RaylibDrawHandle, es: &Entities) {
 const SCREEN_BOX: Rectangle = Rectangle::new(0.0, 0.0, 800.0, 500.0);
 
 const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 375.0, 800.0, 125.0);
+
+const TRACER_MODE_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 90.0, 10.0, 37.0, 37.0);
+const NEXT_TRACER_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 46.0, 10.0, 37.0, 37.0);
 
 const ETHERNET_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
 const DISCONNECT_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
@@ -229,7 +260,7 @@ const SELECT_SELBOX: Rectangle = Rectangle::new(
     37.0,
 );
 
-fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
+fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     let border_color = Color::get_color(d.gui_get_style(
         GuiControl::STATUSBAR,
         GuiControlProperty::BORDER_COLOR_DISABLED as i32,
@@ -251,7 +282,80 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
         color
     }
 
+    // Packet Tracer Controls
+    //----------------------------------------------
+    d.draw_rectangle(SCREEN_BOX.width as i32 - 92, 8, 85, 41, Color::WHITE);
+
+    utils::draw_icon(
+        if s.tracer_mode {
+            GuiIconName::ICON_PLAYER_PLAY
+        } else {
+            GuiIconName::ICON_PLAYER_PAUSE
+        },
+        SCREEN_BOX.width as i32 - 88,
+        12,
+        2,
+        Color::BLACK,
+    );
+    d.draw_rectangle_lines_ex(
+        TRACER_MODE_SELBOX,
+        1.5,
+        border_selection_color(d, &TRACER_MODE_SELBOX, s.tracer_mode),
+    );
+
+    utils::draw_icon(
+        GuiIconName::ICON_PLAYER_NEXT,
+        SCREEN_BOX.width as i32 - 43,
+        12,
+        2,
+        Color::BLACK,
+    );
+    d.draw_rectangle_lines_ex(
+        NEXT_TRACER_SELBOX,
+        1.5,
+        if s.tracer_mode {
+            border_selection_color(d, &NEXT_TRACER_SELBOX, false)
+        } else {
+            border_color
+        },
+    );
+
+    //----------------------------------------------
+
+    // Select Mode Button
+    //----------------------------------------------
+    if s.mode == GuiMode::Select {
+        d.gui_set_state(ffi::GuiState::STATE_PRESSED);
+    }
+
+    d.draw_rectangle_rec(SELECT_SELBOX, Color::RAYWHITE);
+    d.draw_rectangle_lines_ex(
+        SELECT_SELBOX,
+        1.5,
+        border_selection_color(
+            d,
+            &SELECT_SELBOX,
+            s.mode == GuiMode::Select
+                || s.mode == GuiMode::Drag && s.drag_prev_mode == GuiMode::Select,
+        ),
+    );
+    utils::draw_icon(
+        GuiIconName::ICON_CURSOR_MOVE,
+        SELECT_SELBOX.x.trunc() as i32 + 2,
+        SELECT_SELBOX.y.trunc() as i32 + 1,
+        2,
+        Color::BLACK,
+    );
+
+    if s.mode == GuiMode::Select {
+        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+    }
+    //----------------------------------------------
+
+    // Panel
+    //----------------------------------------------
     d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
+    //----------------------------------------------
 
     // Connection Type Button
     //----------------------------------------------
@@ -302,36 +406,6 @@ fn draw_controls_panel(d: &mut RaylibDrawHandle, s: &mut GuiState) {
         Vector2::new(1.0, 101.0),
         border_color,
     );
-    //----------------------------------------------
-
-    // Select Mode Button
-    //----------------------------------------------
-    if s.mode == GuiMode::Select {
-        d.gui_set_state(ffi::GuiState::STATE_PRESSED);
-    }
-
-    d.draw_rectangle_rec(SELECT_SELBOX, Color::RAYWHITE);
-    d.draw_rectangle_lines_ex(
-        SELECT_SELBOX,
-        1.5,
-        border_selection_color(
-            d,
-            &SELECT_SELBOX,
-            s.mode == GuiMode::Select
-                || s.mode == GuiMode::Drag && s.drag_prev_mode == GuiMode::Select,
-        ),
-    );
-    utils::draw_icon(
-        GuiIconName::ICON_CURSOR_MOVE,
-        SELECT_SELBOX.x.trunc() as i32 + 2,
-        SELECT_SELBOX.y.trunc() as i32 + 1,
-        2,
-        Color::BLACK,
-    );
-
-    if s.mode == GuiMode::Select {
-        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-    }
     //----------------------------------------------
 
     // Menu Options
@@ -441,20 +515,23 @@ enum GuiMode {
 struct GuiState {
     mode: GuiMode,
 
-    open_dropdown: Option<EntityId>,
-    selected_window: Option<EntityId>,
-    open_windows: Vec<EntityId>,
+    tracer_mode: bool,
+    tracer_next: bool,
+
+    open_dropdown: Option<DeviceId>,
+    selected_window: Option<DeviceId>,
+    open_windows: Vec<DeviceId>,
 
     place_type: Option<DeviceKind>,
 
     drag_prev_mode: GuiMode,
-    drag_device: Option<EntityId>,
+    drag_device: Option<DeviceId>,
     drag_origin: Vector2,
 
-    remove_d: Option<(usize, EntityId)>, // (port, id)
+    remove_d: Option<(usize, DeviceId)>, // (port, id)
 
-    connect_d1: Option<(usize, EntityId)>,
-    connect_d2: Option<(usize, EntityId)>,
+    connect_d1: Option<(usize, DeviceId)>,
+    connect_d2: Option<(usize, DeviceId)>,
 
     menu_selected: MenuKind,
 }
@@ -463,6 +540,9 @@ impl Default for GuiState {
     fn default() -> Self {
         Self {
             mode: GuiMode::Select,
+
+            tracer_mode: false,
+            tracer_next: false,
 
             open_dropdown: None,
             selected_window: None,
@@ -483,6 +563,43 @@ impl Default for GuiState {
     }
 }
 
+fn add_tracer_packets(ds: &mut Devices) {
+    let mut packets = vec![];
+    for (id, adjs) in ds.adj_devices.iter() {
+        let e = ds.get(*id);
+        let mut port_id_lookup = HashMap::new();
+        let mut ports = vec![];
+        for (port, adj_id, _) in adjs {
+            port_id_lookup.insert(*port, *adj_id);
+            ports.push(*port);
+        }
+
+        let traffic = e.traffic(ports);
+
+        for (port, ingress) in traffic {
+            let origin = if ingress {
+                ds.get(port_id_lookup.get(&port).unwrap().clone()).pos()
+            } else {
+                e.pos()
+            };
+
+            let destination = if ingress {
+                e.pos()
+            } else {
+                ds.get(port_id_lookup.get(&port).unwrap().clone()).pos()
+            };
+
+            packets.push(if ingress {
+                PacketEntity::egress(origin, destination) // ingress means the prev device is sending to this device
+            } else {
+                PacketEntity::ingress(origin) // egress means this device is sending to the next device next frame, queue it up
+            });
+        }
+    }
+
+    ds.packets = packets;
+}
+
 pub fn run() {
     let (mut rl, thread) = raylib::init()
         .size(800, 500)
@@ -491,19 +608,22 @@ pub fn run() {
 
     rl.set_target_fps(30);
 
-    let mut es = Entities::new();
-
+    let mut ds = Devices::new();
     let mut last_connected_pos = Vector2::zero();
-
     let mut s = GuiState::default();
 
     while !rl.window_should_close() {
-        es.update();
-        handle_click(&mut s, &mut rl, &mut es);
+        if s.tracer_mode && s.tracer_next {
+            add_tracer_packets(&mut ds);
+        }
+
+        ds.update(!s.tracer_mode || s.tracer_next);
+        s.tracer_next = false;
+
+        handle_click(&mut s, &mut rl, &mut ds);
 
         let mut d = rl.begin_drawing(&thread);
-
-        draw_connections(&mut d, &es);
+        draw_connections(&mut d, &ds);
 
         // Draw a line to the mouse if connecting devices
         if s.mode == GuiMode::Connect && s.connect_d1.is_some() && s.connect_d2.is_none() {
@@ -514,7 +634,7 @@ pub fn run() {
             };
 
             let (_, id) = s.connect_d1.unwrap();
-            let e = es.get(id);
+            let e = ds.get(id);
             d.draw_line_ex(
                 Vector2::new(e.pos().x, e.pos().y),
                 Vector2::new(last_connected_pos.x, last_connected_pos.y),
@@ -544,10 +664,8 @@ pub fn run() {
             _ => {}
         }
 
-        es.render(&mut d, &mut s);
-
-        draw_controls_panel(&mut d, &mut s);
-
+        ds.render(&mut d, &mut s);
+        draw_gui_controls(&mut d, &mut s);
         d.clear_background(Color::BLACK);
     }
 }

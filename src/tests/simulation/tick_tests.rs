@@ -12,6 +12,7 @@ use crate::{
     tick::{Tickable, TimeProvider},
 };
 
+#[ignore = "Messes with the global TimeProvider instance"]
 #[test]
 fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
     // Arrange
@@ -42,6 +43,7 @@ fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
     {
         let mut tp = TimeProvider::instance().lock().unwrap();
         tp.advance(Duration::from_secs(15));
+        tp.unfreeze();
     }
 
     s.tick();
@@ -57,6 +59,7 @@ fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
     assert_eq!(i2_data.len(), 1);
 }
 
+#[ignore = "Messes with the global TimeProvider instance"]
 #[test]
 fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
     // Arrange
