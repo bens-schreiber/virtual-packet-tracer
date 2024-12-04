@@ -8,6 +8,7 @@ pub struct TimeProvider {
     frozen: Option<SystemTime>,
     offset: Duration,
     last_unfrozen: SystemTime,
+    last_frozen: Option<SystemTime>,
 }
 
 impl TimeProvider {
@@ -23,6 +24,7 @@ impl TimeProvider {
             frozen: None,
             offset: Duration::ZERO,
             last_unfrozen: SystemTime::now(),
+            last_frozen: None,
         }
     }
 
@@ -34,6 +36,7 @@ impl TimeProvider {
         }
 
         self.frozen = Some(self.now());
+        self.last_frozen = self.frozen;
     }
 
     pub fn unfreeze(&mut self) {
@@ -64,6 +67,10 @@ impl TimeProvider {
             Some(frozen_time) => frozen_time,
             None => SystemTime::now() + self.offset,
         }
+    }
+
+    pub fn last_frozen(&self) -> Option<SystemTime> {
+        self.last_frozen
     }
 }
 

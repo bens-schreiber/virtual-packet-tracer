@@ -145,6 +145,10 @@ impl EthernetPort {
         incoming
     }
 
+    pub fn sniff(&self) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        (self.incoming_buffer.clone(), self.outgoing_buffer.clone())
+    }
+
     pub fn has_outgoing(&self) -> bool {
         !self.outgoing_buffer.is_empty()
     }

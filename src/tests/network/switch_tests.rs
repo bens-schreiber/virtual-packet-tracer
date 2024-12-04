@@ -205,9 +205,9 @@ fn SpanningTree_Init_SendsBpdus() {
         bpdu,
         BpduFrame::new(
             mac_bpdu_addr!(),
-            switch.mac_address(),
+            switch.mac_address,
             false,
-            BpduFrame::flags(true, true, 4, false, false, false),
+            BpduFrame::flags(true, true, 0, false, true, false),
             switch.bid(),
             0,
             switch.bid(),

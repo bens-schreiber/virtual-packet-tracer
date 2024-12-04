@@ -4,7 +4,7 @@ use crate::{
     is_ipv4_multicast_or_broadcast, mac_addr,
     network::{
         ethernet::{ByteSerialize, MacAddress},
-        ipv4::{interface::Ipv4Interface, IcmpType, Ipv4Address},
+        ipv4::{interface::Ipv4Interface, IcmpType, Ipv4Address, Ipv4Protocol},
     },
     network_address,
     tick::{TickTimer, Tickable},
@@ -146,7 +146,7 @@ impl Router {
                         Some(route.ip_address),
                         frame.ttl - 1,
                         frame.data,
-                        frame.protocol == 1,
+                        Ipv4Protocol::from(frame.protocol),
                     );
 
                     continue;
@@ -183,7 +183,9 @@ impl Router {
                 continue;
             }
 
-            rp.interface.borrow_mut().multicast(data.clone());
+            rp.interface
+                .borrow_mut()
+                .multicast(data.clone(), Ipv4Protocol::Rip);
         }
     }
 
@@ -242,7 +244,9 @@ impl Router {
         let mut rp = self.ports[port].borrow_mut();
         self.rip_enabled = true;
         rp.rip_enabled = true;
-        rp.interface.borrow_mut().multicast(frame.to_bytes());
+        rp.interface
+            .borrow_mut()
+            .multicast(frame.to_bytes(), Ipv4Protocol::Rip);
 
         self.timer
             .schedule(RouterDelayedAction::RipMulticast, 5, true);
@@ -293,6 +297,15 @@ impl Router {
         rp.interface.borrow_mut().disconnect();
         rp.enabled = false;
         rp.rip_enabled = false;
+    }
+
+    pub fn mac_addr(&self, port: usize) -> MacAddress {
+        self.ports[port]
+            .borrow()
+            .interface
+            .borrow()
+            .ethernet
+            .mac_address
     }
 
     pub fn is_port_up(&self, port: usize) -> bool {

@@ -5,7 +5,7 @@ use crate::{
     network::{
         device::{cable::CableSimulator, router::Router},
         ethernet::ByteSerialize,
-        ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Frame},
+        ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Frame, Ipv4Protocol},
     },
 };
 
@@ -27,10 +27,8 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
     sim.add(i1.ethernet.port());
     sim.adds(r.ports());
 
-    let data: Vec<u8> = "Hello, world!".as_bytes().into();
-
     // Act
-    let _ = i1.send([192, 168, 2, 1], data.clone()); // ---- i1 -> r ARP
+    i1.send_t([192, 168, 2, 1], 1); // ---- i1 -> r ARP
     sim.transmit();
 
     r.route();
@@ -53,7 +51,7 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
             [192, 168, 1, 2],
             64,
             IcmpFrame::destination_unreachable(0, vec![]).to_bytes(),
-            true
+            Ipv4Protocol::Icmp,
         )
     );
 }
@@ -76,10 +74,8 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     sim.add(i1.ethernet.port());
     sim.adds(r.ports());
 
-    let data: Vec<u8> = "Hello, world!".as_bytes().into();
-
     // Act
-    let _ = i1.send(i1.default_gateway.unwrap(), data.clone());
+    i1.send_t(i1.default_gateway.unwrap(), 1);
     sim.transmit();
 
     r.route();
@@ -93,13 +89,7 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     assert_eq!(r_p0_receive.len(), 1);
     assert_eq!(
         r_p0_receive[0],
-        Ipv4Frame::new(
-            i1.ip_address,
-            i1.default_gateway.unwrap(),
-            64,
-            data.clone(),
-            false
-        )
+        Ipv4Frame::test(i1.ip_address, i1.default_gateway.unwrap(), 64, 1)
     );
 }
 
@@ -130,10 +120,8 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
     sim.adds(r.ports());
 
-    let data: Vec<u8> = "Hello, world!".as_bytes().into();
-
     // Act
-    let _ = i1.send(i2.ip_address, data.clone()); // ---- i1 -> r Resolve mac addresses
+    i1.send_t(i2.ip_address, 1); // ---- i1 -> r Resolve mac addresses
     sim.transmit();
 
     r.route();
@@ -148,7 +136,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     i2.receive();
     sim.transmit();
 
-    r.route(); // ---- r -> i2 send frame
+    r.route(); // ---- r -> i2.send_t frame
     sim.transmit();
 
     let i2_data = i2.receive();
@@ -157,7 +145,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 63, data.clone(), false)
+        Ipv4Frame::test(i1.ip_address, i2.ip_address, 63, 1)
     );
 }
 
@@ -196,8 +184,6 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     sim.adds(r1.ports());
     sim.adds(r2.ports());
 
-    let data: Vec<u8> = "Hello, world!".as_bytes().into();
-
     // Act
     sim.transmit();
 
@@ -205,7 +191,7 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     r2.route();
     sim.transmit();
 
-    let _ = i1.send(i2.ip_address, data.clone());
+    i1.send_t(i2.ip_address, 1);
 
     for _ in 0..6 {
         sim.transmit();
@@ -222,7 +208,7 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     assert_eq!(i2_data.len(), 1);
     assert_eq!(
         i2_data[0],
-        Ipv4Frame::new(i1.ip_address, i2.ip_address, 62, data.clone(), false)
+        Ipv4Frame::test(i1.ip_address, i2.ip_address, 62, 1)
     );
 }
 
@@ -245,7 +231,8 @@ fn Route_PingDefaultGateway_ReceiveFrame() {
     sim.adds(r1.ports());
 
     // Act
-    let _ = i1.send_icmp(i1.default_gateway.unwrap(), IcmpType::EchoRequest); // ---- arp default gateway
+    i1.send_icmp(i1.default_gateway.unwrap(), IcmpType::EchoRequest)
+        .unwrap(); // ---- arp default gateway
     sim.transmit();
 
     r1.route();
@@ -254,7 +241,7 @@ fn Route_PingDefaultGateway_ReceiveFrame() {
     i1.receive(); // ---- i1 -> r send frame
     sim.transmit();
 
-    r1.route(); // ---- r -> i1 send
+    r1.route(); // ---- r -> i1.send_t
     sim.transmit();
 
     let i1_data = i1.receive();
@@ -268,7 +255,7 @@ fn Route_PingDefaultGateway_ReceiveFrame() {
             i1.ip_address,
             64, // Should not use the router, reply directly from the interface
             IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
-            true
+            Ipv4Protocol::Icmp
         )
     );
 }
@@ -292,7 +279,8 @@ fn Route_PingUnreachable_ReturnUnreachable() {
     sim.adds(r1.ports());
 
     // Act
-    let _ = i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest); // ---- arp default gateway
+    i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest)
+        .unwrap(); // ---- arp default gateway
     sim.transmit();
 
     r1.route();
@@ -301,7 +289,7 @@ fn Route_PingUnreachable_ReturnUnreachable() {
     i1.receive(); // ---- i1 -> r send frame
     sim.transmit();
 
-    r1.route(); // ---- r -> i1 send
+    r1.route(); // ---- r -> i1.send_t
     sim.transmit();
 
     let i1_data = i1.receive();
@@ -315,7 +303,7 @@ fn Route_PingUnreachable_ReturnUnreachable() {
             i1.ip_address,
             64, // Should not use the router, reply directly from the interface
             IcmpFrame::destination_unreachable(0, vec![]).to_bytes(),
-            true
+            Ipv4Protocol::Icmp
         )
     );
 }
@@ -340,7 +328,8 @@ fn Route_PingOtherRouterInterface_ReceiveFrame() {
     sim.adds(r1.ports());
 
     // Act
-    let _ = i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest); // ---- arp default gateway
+    i1.send_icmp([192, 168, 2, 1], IcmpType::EchoRequest)
+        .unwrap(); // ---- arp default gateway
     sim.transmit();
 
     r1.route();
@@ -349,7 +338,7 @@ fn Route_PingOtherRouterInterface_ReceiveFrame() {
     i1.receive(); // ---- i1 -> r send frame
     sim.transmit();
 
-    r1.route(); // ---- r -> i1 send
+    r1.route(); // ---- r -> i1.send_t
     sim.transmit();
 
     r1.route();
@@ -366,7 +355,7 @@ fn Route_PingOtherRouterInterface_ReceiveFrame() {
             i1.ip_address,
             63, // Should not use the router, reply directly from the interface
             IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
-            true
+            Ipv4Protocol::Icmp
         )
     );
 }
@@ -414,7 +403,7 @@ fn Route_PingAcrossRouter_ReceiveFrame() {
     i2.receive();
     sim.transmit();
 
-    r1.route(); // ---- r -> i2 send
+    r1.route(); // ---- r -> i2.send_t
     sim.transmit();
 
     i2.receive();
@@ -434,7 +423,7 @@ fn Route_PingAcrossRouter_ReceiveFrame() {
             i1.ip_address,
             63,
             IcmpFrame::echo_reply(0, 0, vec![]).to_bytes(),
-            true
+            Ipv4Protocol::Icmp,
         )
     );
 }

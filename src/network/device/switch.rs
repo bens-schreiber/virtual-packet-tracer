@@ -47,7 +47,7 @@ pub struct Switch {
     ports: [RefCell<SwitchPort>; 32],  // 32 physical ports
     table: HashMap<MacAddress, usize>, // maps an address to the interface it's connected to.
 
-    mac_address: MacAddress,
+    pub mac_address: MacAddress,
     bridge_priority: u16, // The priority of the switch in the spanning tree protocol. Lowest priority is the root bridge.
 
     root_bid: u64,            // Root Bridge ID = Root MAC Address + Root Priority
@@ -196,7 +196,7 @@ impl Switch {
         }
     }
 
-    /// Returns a list of all the EthernetPorts connected to the switch.
+    /// Returns a list of all the physical EthernetPorts on the switch.
     pub fn ports(&self) -> Vec<Rc<RefCell<EthernetPort>>> {
         self.ports
             .iter()
@@ -204,34 +204,29 @@ impl Switch {
             .collect()
     }
 
-    /// Returns the MAC address of the switch.
-    pub fn mac_address(&self) -> MacAddress {
-        self.mac_address
+    /// Returns the STP state of the port.
+    pub fn port_state(&self, port_id: usize) -> bool {
+        self.ports[port_id].borrow().stp_state == StpState::Discarding
     }
 
-    /// Returns the bridge priority of the switch.
     pub fn bridge_priority(&self) -> u16 {
         self.bridge_priority
     }
 
-    /// Returns the root bridge ID of the switch.
     pub fn root_bid(&self) -> u64 {
         self.root_bid
     }
 
-    /// Returns the root cost of the switch.
     pub fn root_cost(&self) -> u32 {
         self.root_cost
     }
 
-    /// Returns the root port of the switch.
     pub fn root_port(&self) -> Option<usize> {
         self.root_port
     }
 
-    /// Returns the STP state of the port.
-    pub fn port_discarding(&self, port_id: usize) -> bool {
-        self.ports[port_id].borrow().stp_state == StpState::Discarding
+    pub fn mac_addr(&self, port_id: usize) -> MacAddress {
+        self.ports[port_id].borrow().interface.mac_address
     }
 
     pub fn set_bridge_priority(&mut self, priority: u16) {
