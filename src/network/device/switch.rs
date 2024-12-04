@@ -50,6 +50,7 @@ pub struct Switch {
     pub mac_address: MacAddress,
     bridge_priority: u16, // The priority of the switch in the spanning tree protocol. Lowest priority is the root bridge.
 
+    rstp: bool,               // if rstp is enabled
     root_bid: u64,            // Root Bridge ID = Root MAC Address + Root Priority
     root_cost: u32,           // The cost of the path to the root bridge ; 0 for the root bridge
     root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
@@ -92,6 +93,7 @@ impl Switch {
             table: HashMap::new(),
             bridge_priority,
             mac_address: mac_addr!(mac_seed),
+            rstp: false,
             root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority), // Assume the switch is the root bridge
             root_cost: 0,
             root_port: None,
@@ -101,7 +103,7 @@ impl Switch {
         }
     }
 
-    /// Connects two ports together via EthernetPorts (bi-directional).
+    /// Connects two ports together via EthernetPorts (bi-directional). Sends a hello BPDU if RSTP is enabled.
     /// * `port_id` - The id of the port on this switch to connect.
     /// * `interface` - An EthernetInterface to connect to the switch.
     /// # Panics
@@ -111,6 +113,20 @@ impl Switch {
             .borrow_mut()
             .interface
             .connect(interface);
+
+        if self.rstp {
+            self.ports[port_id].borrow_mut().interface.send8023(
+                crate::mac_bpdu_addr!(),
+                BpduFrame::hello(
+                    self.mac_address,
+                    self.root_bid,
+                    self.root_cost,
+                    self.bid(),
+                    port_id,
+                )
+                .to_bytes(),
+            );
+        }
     }
 
     #[cfg(test)]
@@ -155,6 +171,9 @@ impl Switch {
                         }
                     }
                     EthernetFrame::Ethernet802_3(f) => {
+                        if !self.rstp {
+                            continue; // TODO: Switch should just forward the frame if RSTP is disabled
+                        }
                         if let Ok(bpdu) = BpduFrame::from_bytes(f.data) {
                             self._receive_bpdu(bpdu, i);
                         }
@@ -341,6 +360,7 @@ impl Switch {
     ///
     /// The switch will wait 15 seconds before transitioning to `finish_init_stp`.
     pub fn init_stp(&mut self) {
+        self.rstp = true;
         for stp_port in self.ports.iter() {
             stp_port.borrow_mut().stp_state = StpState::Discarding;
             stp_port.borrow_mut().stp_role = Some(StpRole::Root);
@@ -364,19 +384,24 @@ impl Switch {
             .schedule(SwitchDelayedAction::BpduMulticast, 2, true);
     }
 
-    /// Disconnects a port from the switch. Reworks the STP roles and states.
+    /// Disconnects a port from the switch as well as from STP.
+    pub fn disconnect(&mut self, port_id: usize) {
+        self.ports[port_id]
+            .borrow_mut()
+            .interface
+            .port()
+            .borrow_mut()
+            .disconnect();
+        self.rstp_disconnect(port_id);
+    }
+
+    /// Reworks the STP roles and states.
     /// * `port_id` - The id of the port to disconnect.
     ///
     /// # Panics
     /// Panics if the port_id is greater than 32.
-    pub fn disconnect(&mut self, port_id: usize) {
+    pub fn rstp_disconnect(&mut self, port_id: usize) {
         if self.is_root_bridge() {
-            self.ports[port_id]
-                .borrow_mut()
-                .interface
-                .port()
-                .borrow_mut()
-                .disconnect();
             return;
         }
 
@@ -389,7 +414,6 @@ impl Switch {
             sp.stp_state = StpState::Forwarding;
             sp.bid = None;
             sp.root_cost = 0;
-            sp.interface.port().borrow_mut().disconnect();
 
             prev_role
         };
@@ -596,7 +620,7 @@ impl Tickable for Switch {
                         if !self.received_bpdu[i] && self.ports[i].borrow().bid.is_some() {
                             self.missed_hellos[i] += 1;
                             if self.missed_hellos[i] >= 3 {
-                                self.disconnect(i);
+                                self.rstp_disconnect(i);
                                 self.missed_hellos[i] = 0;
                             }
                         } else {

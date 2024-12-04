@@ -84,8 +84,8 @@ struct GuiState {
     connect_d2: Option<(usize, DeviceId)>,
 
     packet_stack: Vec<Packet>,
-    panel_view: Rectangle,
-    packet_scroll: Vector2,
+    table_view: Rectangle,
+    table_scroll: Vector2,
 }
 
 impl Default for GuiState {
@@ -112,8 +112,8 @@ impl Default for GuiState {
             connect_d2: None,
 
             packet_stack: vec![],
-            panel_view: Rectangle::new(0.0, 0.0, 0.0, 0.0),
-            packet_scroll: Vector2::zero(),
+            table_view: Rectangle::new(0.0, 0.0, 0.0, 0.0),
+            table_scroll: Vector2::zero(),
         }
     }
 }
@@ -517,10 +517,10 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
     };
 
     if let (false, rec, vec) =
-        d.gui_scroll_panel(bounds, None, content_bounds, s.packet_scroll, s.panel_view)
+        d.gui_scroll_panel(bounds, None, content_bounds, s.table_scroll, s.table_view)
     {
-        s.packet_scroll = vec;
-        s.panel_view = rec;
+        s.table_scroll = vec;
+        s.table_view = rec;
     }
 
     d.draw_rectangle_rec(PACKET_TABLE_SELBOX, Color::RAYWHITE.brightness(-0.05));
@@ -611,8 +611,8 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
     );
 
     // Rows
-    let mut y = PACKET_TABLE_SELBOX.y + 30.0 + s.packet_scroll.y;
-    for p in s.packet_stack.iter() {
+    let mut y = PACKET_TABLE_SELBOX.y + 30.0 + s.table_scroll.y;
+    for p in s.packet_stack.iter().rev() {
         let time = {
             let tp = TimeProvider::instance().lock().unwrap();
             let elapsed = p.time.duration_since(tp.last_frozen().unwrap()).unwrap();
@@ -677,24 +677,6 @@ fn add_tracer_packets(ds: &mut Devices, s: &mut GuiState) {
         let traffic = e.traffic(ports);
 
         for (port, ingress) in traffic {
-            let origin = if ingress {
-                ds.get(port_id_lookup.get(&port).unwrap().clone()).pos()
-            } else {
-                e.pos()
-            };
-
-            let destination = if ingress {
-                e.pos()
-            } else {
-                ds.get(port_id_lookup.get(&port).unwrap().clone()).pos()
-            };
-
-            packets.push(if ingress {
-                PacketEntity::egress(origin, destination) // ingress means the prev device is sending to this device
-            } else {
-                PacketEntity::ingress(origin) // egress means this device is sending to the next device next frame, queue it up
-            });
-
             // Add the packet to the packet stack
             let data = {
                 let (ing, egr) = e.sniff(port);
@@ -705,12 +687,32 @@ fn add_tracer_packets(ds: &mut Devices, s: &mut GuiState) {
                 }
             };
 
+            let adj_pos = || ds.get(port_id_lookup.get(&port).unwrap().clone()).pos();
             for d in data {
                 let kind = utils::determine_packet_kind(&d);
                 let time = {
                     let tp = TimeProvider::instance().lock().unwrap();
                     tp.now()
                 };
+
+                let sent_from_self = kind.source_mac() == e.mac_addr(port);
+
+                let origin = if ingress && !sent_from_self {
+                    adj_pos()
+                } else {
+                    e.pos()
+                };
+
+                let destination = if ingress { e.pos() } else { adj_pos() };
+
+                // Animation packet
+                packets.push(if ingress && !sent_from_self {
+                    PacketEntity::egress(origin, destination)
+                } else {
+                    PacketEntity::ingress(origin)
+                });
+
+                // Table packet
                 s.packet_stack.push(Packet {
                     last: if kind.source_mac() == e.mac_addr(port) {
                         None
@@ -781,6 +783,11 @@ pub fn run() {
         s.tracer_next = false;
 
         handle_click(&mut s, &mut rl, &mut ds);
+
+        if !s.tracer_mode {
+            s.packet_stack.clear();
+            ds.packets.clear();
+        }
 
         let mut d = rl.begin_drawing(&thread);
         draw_connections(&mut d, &ds);

@@ -139,10 +139,10 @@ impl<T: Eq + Hash + Clone> Tickable for TickTimer<T> {
         };
 
         self.map
-            .retain(|_, (time_until, _, persist)| *time_until > now || *persist);
+            .retain(|_, (time_ready, _, persist)| *time_ready > now || *persist);
 
         for (_, (time_ready, interval_in_seconds, persist)) in self.map.iter_mut() {
-            if *time_ready < now {
+            if *time_ready > now {
                 continue;
             }
             if !*persist {
