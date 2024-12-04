@@ -95,6 +95,7 @@ impl Router {
         for i in 0..self.ports.len() {
             let rp = &mut *self.ports[i].borrow_mut();
             if !rp.enabled {
+                rp.interface.borrow_mut().ethernet.receive(); // Drop frames, bypass ipv4 processing
                 continue;
             }
 
