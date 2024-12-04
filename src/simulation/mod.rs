@@ -14,17 +14,19 @@ use crate::tick::TimeProvider;
 
 const SCREEN_BOX: Rectangle = Rectangle::new(0.0, 0.0, 800.0, 500.0);
 
-const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 375.0, 800.0, 125.0);
+const GUI_CONTROLS_PANEL: Rectangle = Rectangle::new(0.0, 380.0, 800.0, 120.0);
 
 const TRACER_MODE_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 90.0, 10.0, 37.0, 37.0);
 const NEXT_TRACER_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 46.0, 10.0, 37.0, 37.0);
 
-const ETHERNET_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
-const DISCONNECT_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
+const ETHERNET_SELBOX: Rectangle = Rectangle::new(10.0, 417.0, 70.0, 70.0);
+const DISCONNECT_SELBOX: Rectangle = Rectangle::new(90.0, 417.0, 70.0, 70.0);
+const DESKTOP_SELBOX: Rectangle = Rectangle::new(170.0, 417.0, 70.0, 70.0);
+const SWITCH_SELBOX: Rectangle = Rectangle::new(250.0, 417.0, 70.0, 70.0);
+const ROUTER_SELBOX: Rectangle = Rectangle::new(330.0, 417.0, 70.0, 70.0);
 
-const DESKTOP_SELBOX: Rectangle = Rectangle::new(137.0, 408.0, 70.0, 70.0);
-const SWITCH_SELBOX: Rectangle = Rectangle::new(215.0, 408.0, 70.0, 70.0);
-const ROUTER_SELBOX: Rectangle = Rectangle::new(293.0, 408.0, 70.0, 70.0);
+const PACKET_TABLE_SELBOX: Rectangle =
+    Rectangle::new(420.0, 403.0, SCREEN_BOX.width - 420.0, 100.0);
 
 const SELECT_SELBOX: Rectangle = Rectangle::new(
     SCREEN_BOX.width - 45.0,
@@ -38,12 +40,6 @@ enum DeviceKind {
     Desktop,
     Switch,
     Router,
-}
-
-#[derive(PartialEq)]
-enum MenuKind {
-    Connection,
-    Device,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -75,8 +71,6 @@ struct GuiState {
 
     connect_d1: Option<(usize, DeviceId)>,
     connect_d2: Option<(usize, DeviceId)>,
-
-    menu_selected: MenuKind,
 }
 
 impl Default for GuiState {
@@ -101,7 +95,6 @@ impl Default for GuiState {
 
             connect_d1: None,
             connect_d2: None,
-            menu_selected: MenuKind::Device,
         }
     }
 }
@@ -154,31 +147,28 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
     }
 
     if left_mouse_clicked {
-        match s.menu_selected {
-            MenuKind::Connection => {
-                if ETHERNET_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                    s.mode = GuiMode::Connect;
-                    return;
-                } else if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                    s.mode = GuiMode::Remove;
-                    return;
-                }
-            }
-            MenuKind::Device => {
-                if DESKTOP_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                    s.mode = GuiMode::Place;
-                    s.place_type = Some(DeviceKind::Desktop);
-                    return;
-                } else if SWITCH_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                    s.mode = GuiMode::Place;
-                    s.place_type = Some(DeviceKind::Switch);
-                    return;
-                } else if ROUTER_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-                    s.mode = GuiMode::Place;
-                    s.place_type = Some(DeviceKind::Router);
-                    return;
-                }
-            }
+        if ETHERNET_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Connect;
+            return;
+        }
+        if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Remove;
+            return;
+        }
+        if DESKTOP_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Place;
+            s.place_type = Some(DeviceKind::Desktop);
+            return;
+        }
+        if SWITCH_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Place;
+            s.place_type = Some(DeviceKind::Switch);
+            return;
+        }
+        if ROUTER_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Place;
+            s.place_type = Some(DeviceKind::Router);
+            return;
         }
 
         if SELECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
@@ -208,6 +198,7 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
             return;
         }
     }
+    //------------------------------------------------------
 
     // Sim Controls
     //------------------------------------------------------
@@ -322,6 +313,13 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
     // ------------------------------------------------------
 }
 
+struct Selbox {
+    rec: Rectangle,
+    text: &'static str,
+    icon: GuiIconName,
+    fixed: bool,
+}
+
 /// The bottom panel GUI controls
 fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     let border_color = Color::get_color(d.gui_get_style(
@@ -347,7 +345,7 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
 
     // Packet Tracer Controls
     //----------------------------------------------
-    d.draw_rectangle(SCREEN_BOX.width as i32 - 92, 8, 85, 41, Color::WHITE);
+    d.draw_rectangle(SCREEN_BOX.width as i32 - 92, 8, 85, 41, Color::RAYWHITE);
 
     utils::draw_icon(
         if s.tracer_mode {
@@ -382,7 +380,11 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             border_color
         },
     );
+    //----------------------------------------------
 
+    // Panel
+    //----------------------------------------------
+    d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
     //----------------------------------------------
 
     // Select Mode Button
@@ -415,142 +417,90 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     }
     //----------------------------------------------
 
-    // Panel
-    //----------------------------------------------
-    d.gui_panel(GUI_CONTROLS_PANEL, Some(rstr!("Controls")));
-    //----------------------------------------------
-
-    // Connection Type Button
-    //----------------------------------------------
-    if s.menu_selected == MenuKind::Connection {
-        d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
-    }
-
-    if d.gui_button(
-        Rectangle::new(15.0, 415.0, 100.0, 30.0),
-        Some(rstr!("Connection Types")),
-    ) {
-        s.menu_selected = MenuKind::Connection;
-    }
-
-    if s.menu_selected == MenuKind::Connection {
-        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-    }
-    //------------------------------------------------
-
-    // Device Type Button
-    //------------------------------------------------
-    if s.menu_selected == MenuKind::Device {
-        d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
-    }
-
-    if d.gui_button(
-        Rectangle::new(15.0, 455.0, 100.0, 30.0),
-        Some(rstr!("Device Types")),
-    ) {
-        s.menu_selected = MenuKind::Device;
-    }
-
-    if s.menu_selected == MenuKind::Device {
-        d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-    }
-    //------------------------------------------------
-
-    // Box for devices
-    //----------------------------------------------
-    d.draw_rectangle_v(
-        Vector2::new(130.0, 398.0),
-        Vector2::new(1.0, 101.0),
-        border_color,
-    );
-
-    d.draw_rectangle_v(
-        Vector2::new(370.0, 398.0),
-        Vector2::new(1.0, 101.0),
-        border_color,
-    );
-    //----------------------------------------------
-
     // Menu Options
     //----------------------------------------------
-    match s.menu_selected {
-        MenuKind::Connection => {
-            // Ethernet
-            d.draw_line_ex(
-                Vector2::new(145.0, 450.0),
-                Vector2::new(200.0, 420.0),
-                2.0,
-                Color::BLACK,
-            );
-            d.draw_text("Ethernet", 140, 455, 15, Color::BLACK);
-            d.draw_rectangle_lines_ex(
-                ETHERNET_SELBOX,
-                1.5,
-                border_selection_color(d, &ETHERNET_SELBOX, s.mode == GuiMode::Connect),
-            );
+    let selboxes = [
+        Selbox {
+            rec: ETHERNET_SELBOX,
+            text: "Ethernet",
+            icon: GuiIconName::ICON_LINK_NET,
+            fixed: s.mode == GuiMode::Connect,
+        },
+        Selbox {
+            rec: DISCONNECT_SELBOX,
+            text: "Discon.",
+            icon: GuiIconName::ICON_CROSS,
+            fixed: s.mode == GuiMode::Remove,
+        },
+        Selbox {
+            rec: DESKTOP_SELBOX,
+            text: "Desktop",
+            icon: GuiIconName::ICON_MONITOR,
+            fixed: s.place_type == Some(DeviceKind::Desktop) && s.mode == GuiMode::Place,
+        },
+        Selbox {
+            rec: SWITCH_SELBOX,
+            text: "Switch",
+            icon: GuiIconName::ICON_CURSOR_SCALE_FILL,
+            fixed: s.place_type == Some(DeviceKind::Switch) && s.mode == GuiMode::Place,
+        },
+        Selbox {
+            rec: ROUTER_SELBOX,
+            text: "Router",
+            icon: GuiIconName::ICON_SHUFFLE_FILL,
+            fixed: s.place_type == Some(DeviceKind::Router) && s.mode == GuiMode::Place,
+        },
+    ];
 
-            // Disconnect
-            utils::draw_icon(GuiIconName::ICON_CROSS, 225, 410, 3, Color::BLACK);
-            d.draw_text("Remove", 225, 455, 15, Color::BLACK);
-            d.draw_rectangle_lines_ex(
-                DISCONNECT_SELBOX,
-                1.5,
-                border_selection_color(d, &DISCONNECT_SELBOX, s.mode == GuiMode::Remove),
-            );
-        }
-        MenuKind::Device => {
-            let mode = s.mode == GuiMode::Place || s.mode == GuiMode::Drag;
+    for sb in selboxes.iter() {
+        d.draw_rectangle_rec(sb.rec, Color::RAYWHITE);
+        d.draw_rectangle_lines_ex(sb.rec, 1.5, border_selection_color(d, &sb.rec, sb.fixed));
+        utils::draw_icon(
+            sb.icon,
+            sb.rec.x as i32 + 10,
+            sb.rec.y as i32 + 2,
+            3,
+            Color::BLACK,
+        );
 
-            // Desktop (rectangle)
-            utils::draw_icon(GuiIconName::ICON_MONITOR, 147, 410, 3, Color::BLACK);
-            d.draw_text("Desktop", 143, 455, 15, Color::BLACK);
-            d.draw_rectangle_lines_ex(
-                DESKTOP_SELBOX,
-                1.5,
-                border_selection_color(
-                    d,
-                    &DESKTOP_SELBOX,
-                    s.place_type == Some(DeviceKind::Desktop) && mode,
-                ),
-            );
-
-            // Switch
-            d.draw_rectangle_lines_ex(Rectangle::new(230.0, 415.0, 38.0, 38.0), 3.0, Color::BLACK);
-            utils::draw_icon(
-                GuiIconName::ICON_CURSOR_SCALE_FILL,
-                233,
-                418,
-                2,
-                Color::BLACK,
-            );
-            d.draw_text("Switch", 227, 455, 15, Color::BLACK);
-            d.draw_rectangle_lines_ex(
-                SWITCH_SELBOX,
-                1.5,
-                border_selection_color(
-                    d,
-                    &SWITCH_SELBOX,
-                    s.place_type == Some(DeviceKind::Switch) && mode,
-                ),
-            );
-
-            // Router
-            d.draw_circle(328, 435, 21.0, Color::BLACK);
-            d.draw_circle(328, 435, 18.5, Color::RAYWHITE);
-            utils::draw_icon(GuiIconName::ICON_SHUFFLE_FILL, 314, 420, 2, Color::BLACK);
-            d.draw_text("Router", 305, 455, 15, Color::BLACK);
-            d.draw_rectangle_lines_ex(
-                ROUTER_SELBOX,
-                1.5,
-                border_selection_color(
-                    d,
-                    &ROUTER_SELBOX,
-                    s.place_type == Some(DeviceKind::Router) && mode,
-                ),
-            );
-        }
+        // center text
+        let text_len = sb.text.len() as i32 * 8;
+        d.draw_text(
+            sb.text,
+            sb.rec.x as i32 + (sb.rec.width as i32 - text_len) / 2,
+            (sb.rec.y + sb.rec.height - 20.0) as i32,
+            15,
+            Color::BLACK,
+        );
     }
+
+    // Seperator
+    let seperator_x = ROUTER_SELBOX.x + ROUTER_SELBOX.width + 10.0;
+    d.draw_rectangle_v(
+        Vector2::new(seperator_x, ROUTER_SELBOX.y - 12.0),
+        Vector2::new(1.0, GUI_CONTROLS_PANEL.height - 20.0),
+        border_color,
+    );
     //----------------------------------------------
+
+    // Packet Tracer Table
+    //----------------------------------------------
+    d.draw_rectangle_rec(PACKET_TABLE_SELBOX, Color::GRAY.alpha(0.1));
+
+    // center text in the middle of the box
+    if !s.tracer_mode {
+        let text = "Packet Tracer Stopped";
+        let text_len = text.len() as f32 * 4.5;
+        d.draw_text(
+            text,
+            (PACKET_TABLE_SELBOX.x + (PACKET_TABLE_SELBOX.width / 2.0 - text_len)) as i32,
+            (PACKET_TABLE_SELBOX.y + (PACKET_TABLE_SELBOX.height / 2.0 - 10.0)) as i32,
+            16,
+            Color::BLACK.alpha(0.3),
+        );
+    }
+
+    //
 }
 
 /// Adds the "tracer packets" (visual representation of packets) to the devices list for rendering
@@ -601,7 +551,7 @@ fn draw_connections(d: &mut RaylibDrawHandle, ds: &Devices) {
             let start_pos = Vector2::new(e.pos().x, e.pos().y);
             let end_pos = Vector2::new(target.pos().x, target.pos().y);
             if !set.contains(adj_id) {
-                d.draw_line_ex(start_pos, end_pos, 1.5, Color::WHITE);
+                d.draw_line_ex(start_pos, end_pos, 2.5, Color::RAYWHITE);
             }
             set.insert(*id);
 
@@ -661,8 +611,8 @@ pub fn run() {
             d.draw_line_ex(
                 Vector2::new(e.pos().x, e.pos().y),
                 Vector2::new(last_connected_pos.x, last_connected_pos.y),
-                1.5,
-                Color::WHITE,
+                2.5,
+                Color::RAYWHITE,
             );
         }
 
@@ -681,7 +631,7 @@ pub fn run() {
                         d.get_mouse_x() + 15,
                         d.get_mouse_y() + 15,
                         1,
-                        Color::WHITE,
+                        Color::RAYWHITE,
                     );
                 }
             }
