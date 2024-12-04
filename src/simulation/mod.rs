@@ -30,7 +30,7 @@ const SWITCH_SELBOX: Rectangle = Rectangle::new(250.0, 417.0, 70.0, 70.0);
 const ROUTER_SELBOX: Rectangle = Rectangle::new(330.0, 417.0, 70.0, 70.0);
 
 const PACKET_TABLE_SELBOX: Rectangle =
-    Rectangle::new(420.0, 403.0, SCREEN_BOX.width - 420.0, 100.0);
+    Rectangle::new(420.0, 404.0, SCREEN_BOX.width - 420.0, 100.0);
 
 const SELECT_SELBOX: Rectangle = Rectangle::new(
     SCREEN_BOX.width - 45.0,
@@ -84,6 +84,8 @@ struct GuiState {
     connect_d2: Option<(usize, DeviceId)>,
 
     packet_stack: Vec<Packet>,
+    panel_view: Rectangle,
+    packet_scroll: Vector2,
 }
 
 impl Default for GuiState {
@@ -110,6 +112,8 @@ impl Default for GuiState {
             connect_d2: None,
 
             packet_stack: vec![],
+            panel_view: Rectangle::new(0.0, 0.0, 0.0, 0.0),
+            packet_scroll: Vector2::zero(),
         }
     }
 }
@@ -500,7 +504,26 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
 
     // Packet Tracer Table
     //----------------------------------------------
-    d.draw_rectangle_rec(PACKET_TABLE_SELBOX, Color::GRAY.alpha(0.1));
+    let bounds = Rectangle {
+        y: PACKET_TABLE_SELBOX.y + 25.0,
+        height: PACKET_TABLE_SELBOX.height - 25.0,
+        ..PACKET_TABLE_SELBOX
+    };
+    let content_bounds = Rectangle {
+        x: PACKET_TABLE_SELBOX.x,
+        y: PACKET_TABLE_SELBOX.y,
+        width: PACKET_TABLE_SELBOX.width,
+        height: s.packet_stack.len() as f32 * 22.0,
+    };
+
+    if let (false, rec, vec) =
+        d.gui_scroll_panel(bounds, None, content_bounds, s.packet_scroll, s.panel_view)
+    {
+        s.packet_scroll = vec;
+        s.panel_view = rec;
+    }
+
+    d.draw_rectangle_rec(PACKET_TABLE_SELBOX, Color::RAYWHITE.brightness(-0.05));
 
     if !s.tracer_mode {
         let text = "Packet Tracer Stopped";
@@ -580,8 +603,15 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
         border_color,
     );
 
+    let mut sc = d.begin_scissor_mode(
+        bounds.x as i32,
+        bounds.y as i32,
+        bounds.width as i32,
+        bounds.height as i32,
+    );
+
     // Rows
-    let mut y = PACKET_TABLE_SELBOX.y + 30.0;
+    let mut y = PACKET_TABLE_SELBOX.y + 30.0 + s.packet_scroll.y;
     for p in s.packet_stack.iter() {
         let time = {
             let tp = TimeProvider::instance().lock().unwrap();
@@ -598,28 +628,28 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
             PacketKind::Icmp(_) => "ICMP",
         };
 
-        d.draw_text(
+        sc.draw_text(
             &time,
             PACKET_TABLE_SELBOX.x as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
         );
-        d.draw_text(
+        sc.draw_text(
             &last_device,
             (PACKET_TABLE_SELBOX.x + col_width) as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
         );
-        d.draw_text(
+        sc.draw_text(
             &at_device,
             (PACKET_TABLE_SELBOX.x + col_width * 2.0) as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
         );
-        d.draw_text(
+        sc.draw_text(
             packet_type,
             (PACKET_TABLE_SELBOX.x + col_width * 3.0) as i32 + 10,
             y as i32,
@@ -796,7 +826,7 @@ pub fn run() {
         }
 
         ds.render(&mut d, &mut s);
+        d.clear_background(Color::BLACK); // todo: generally this is the last thing to be drawn, but scissor mode is being weird?
         draw_gui_controls(&mut d, &ds, &mut s);
-        d.clear_background(Color::BLACK);
     }
 }
