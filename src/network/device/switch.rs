@@ -55,6 +55,8 @@ pub struct Switch {
     root_port: Option<usize>, // The port that leads to the root bridge ; None if the switch is the root bridge
 
     timer: TickTimer<SwitchDelayedAction>,
+    missed_hellos: [u8; 32], // Number of missed hellos for each port, 3 missed hellos will trigger a topology change
+    received_bpdu: [bool; 32], // Whether a BPDU has been received on the port in the last 2 seconds
 }
 
 impl Switch {
@@ -94,6 +96,8 @@ impl Switch {
             root_cost: 0,
             root_port: None,
             timer: TickTimer::new(),
+            missed_hellos: [0; 32],
+            received_bpdu: [false; 32],
         }
     }
 
@@ -103,9 +107,6 @@ impl Switch {
     /// # Panics
     /// Panics if the port_id is greater than 32.
     pub fn connect(&mut self, port_id: usize, interface: &mut EthernetInterface) {
-        if port_id >= 32 {
-            panic!("Port ID out of range");
-        }
         self.ports[port_id]
             .borrow_mut()
             .interface
@@ -228,6 +229,16 @@ impl Switch {
         self.root_port
     }
 
+    /// Returns the STP state of the port.
+    pub fn port_discarding(&self, port_id: usize) -> bool {
+        self.ports[port_id].borrow().stp_state == StpState::Discarding
+    }
+
+    pub fn set_bridge_priority(&mut self, priority: u16) {
+        self.bridge_priority = priority;
+        self.root_bid = crate::bridge_id!(self.mac_address, priority);
+    }
+
     /// Returns all ports in the designated role.
     #[cfg(test)]
     pub(crate) fn designated_ports(&self) -> Vec<usize> {
@@ -337,6 +348,7 @@ impl Switch {
     pub fn init_stp(&mut self) {
         for stp_port in self.ports.iter() {
             stp_port.borrow_mut().stp_state = StpState::Discarding;
+            stp_port.borrow_mut().stp_role = Some(StpRole::Root);
         }
         self._send_bpdus(true, true, true);
 
@@ -363,10 +375,6 @@ impl Switch {
     /// # Panics
     /// Panics if the port_id is greater than 32.
     pub fn disconnect(&mut self, port_id: usize) {
-        if port_id >= 32 {
-            panic!("Port ID out of range");
-        }
-
         if self.is_root_bridge() {
             self.ports[port_id]
                 .borrow_mut()
@@ -432,6 +440,7 @@ impl Switch {
     }
 
     fn _receive_bpdu(&mut self, bpdu: BpduFrame, port_id: usize) {
+        self.received_bpdu[port_id] = true;
         let prev_root_bid = self.root_bid;
         {
             let mut sp = self.ports[port_id].borrow_mut();
@@ -495,6 +504,7 @@ impl Switch {
                         sp.stp_role = Some(StpRole::Backup);
                         sp.stp_state = StpState::Discarding;
                     }
+                    return;
                 }
             }
             // Incoming BPDUs root is better
@@ -585,6 +595,21 @@ impl Tickable for Switch {
             match action {
                 SwitchDelayedAction::BpduMulticast => {
                     self._send_bpdus(false, false, false);
+
+                    // Find links that are down, (max age = 6 seconds)
+                    for i in 0..32 {
+                        if !self.received_bpdu[i] && self.ports[i].borrow().bid.is_some() {
+                            self.missed_hellos[i] += 1;
+                            if self.missed_hellos[i] >= 3 {
+                                self.disconnect(i);
+                                self.missed_hellos[i] = 0;
+                            }
+                        } else {
+                            self.missed_hellos[i] = 0;
+                        }
+
+                        self.received_bpdu[i] = false;
+                    }
                 }
                 SwitchDelayedAction::RstpInit => {
                     self.finish_init_stp();
@@ -703,10 +728,10 @@ impl BpduFrame {
             bid,
             port,
 
-            // TODO: Implement timers
+            // TODO: These aren't configurable, likely won't change.
             message_age: 0,
-            max_age: 0,
-            hello_time: 0,
+            max_age: 0,    // Treated as 6 seconds
+            hello_time: 0, // Treated as 2 seconds
             forward_delay: 0,
         }
     }

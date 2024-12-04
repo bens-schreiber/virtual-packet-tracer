@@ -215,10 +215,6 @@ impl Router {
         ipv4_address: Ipv4Address,
         subnet_mask: Ipv4Address,
     ) {
-        if port >= self.ports.len() {
-            panic!("Port {} is out of range for the router.", port);
-        }
-
         let rp = &mut *self.ports[port].borrow_mut();
         rp.enabled = true;
 
@@ -238,10 +234,6 @@ impl Router {
     /// Sends a RIP frame to the multicast address.
     /// * `port` - The port number to enable RIP on.
     pub fn enable_rip(&mut self, port: usize) {
-        if port >= self.ports.len() {
-            panic!("Port {} is out of range for the router.", port);
-        }
-
         if !self.ports[port].borrow_mut().enabled {
             panic!("Port {} is disabled.", port);
         }
@@ -263,10 +255,6 @@ impl Router {
     /// # Panics
     /// Panics if the port is out of range
     pub fn connect(&mut self, port: usize, interface: &mut Ipv4Interface) {
-        if port >= self.ports.len() {
-            panic!("Port {} is out of range for the router.", port);
-        }
-
         let rp = &mut *self.ports[port].borrow_mut();
         rp.interface.borrow_mut().connect(interface);
     }
@@ -274,10 +262,6 @@ impl Router {
     #[cfg(test)]
     /// Connects a router to another router on the given ports.
     pub fn connect_router(&mut self, port: usize, other_router: &mut Router, other_port: usize) {
-        if port >= self.ports.len() {
-            panic!("Port {} is out of range for the router.", port);
-        }
-
         let rp = &mut *self.ports[port].borrow_mut();
         if !rp.enabled {
             panic!("Port {} is disabled.", port);
@@ -299,10 +283,6 @@ impl Router {
     /// # Panics
     /// Panics if the port is out of range
     pub fn disconnect(&mut self, port: usize) {
-        if port >= self.ports.len() {
-            panic!("Port {} is out of range for the router.", port);
-        }
-
         let rp = &mut *self.ports[port].borrow_mut();
         if !rp.enabled {
             return;
@@ -313,6 +293,10 @@ impl Router {
         rp.interface.borrow_mut().disconnect();
         rp.enabled = false;
         rp.rip_enabled = false;
+    }
+
+    pub fn is_port_up(&self, port: usize) -> bool {
+        self.ports[port].borrow().enabled
     }
 }
 

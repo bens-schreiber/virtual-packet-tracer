@@ -20,7 +20,7 @@ use crate::{
 };
 
 use super::{
-    terminal::{DesktopTerminal, RouterTerminal},
+    terminal::{DesktopTerminal, RouterTerminal, SwitchTerminal},
     utils, GuiMode, GuiState,
 };
 
@@ -71,6 +71,8 @@ pub trait Device: Entity + Storable {
 
     /// Bounds of the edit window
     fn gui_bounds(&self) -> Rectangle;
+
+    fn is_port_up(&self, port: usize) -> bool;
 }
 
 /// Stores all entities in the simulation. Search for devices by their DeviceId.
@@ -538,6 +540,10 @@ impl Device for DesktopDevice {
         self.edit_gui.bounds()
     }
 
+    fn is_port_up(&self, _: usize) -> bool {
+        true // desktop physical ports are always up (for now)
+    }
+
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
         self.dropdown_gui = Some(DropdownGuiState {
             selection: -1,
@@ -935,6 +941,25 @@ impl Storable for DesktopDevice {
 // Switch Entity
 // ----------------------------------------------
 
+pub struct SwitchEditGuiState {
+    open: bool,
+    pos: Vector2,
+    drag_origin: Option<Vector2>,
+
+    cmd_line_buffer: [u8; 0xFF],
+    cmd_line_out: VecDeque<String>,
+}
+
+impl SwitchEditGuiState {
+    pub fn bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 300.0, 160.0)
+    }
+
+    pub fn tab_bounds(&self) -> Rectangle {
+        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
+    }
+}
+
 pub struct SwitchDevice {
     id: DeviceId,
     switch: Switch,
@@ -943,6 +968,8 @@ pub struct SwitchDevice {
     deleted: bool,
 
     dropdown_gui: Option<DropdownGuiState>,
+    edit_gui: SwitchEditGuiState,
+    terminal: SwitchTerminal,
 }
 
 impl Entity for SwitchDevice {
@@ -959,29 +986,30 @@ impl Entity for SwitchDevice {
     }
 
     fn render(&self, d: &mut RaylibDrawHandle) {
+        let center = Vector2::new(self.pos.x - 20.0, self.pos.y - 20.0);
         d.draw_rectangle_lines_ex(
-            Rectangle::new(self.pos.x, self.pos.y, 40.0, 40.0),
+            Rectangle::new(center.x, center.y, 40.0, 40.0),
             3.0,
             Color::WHITE,
         );
         utils::draw_icon(
             GuiIconName::ICON_CURSOR_SCALE_FILL,
-            self.pos.x as i32 + 5,
-            self.pos.y as i32 + 5,
+            center.x as i32 + 5,
+            center.y as i32 + 5,
             2,
             Color::WHITE,
         );
         d.draw_text(
             &self.label,
-            self.pos.x as i32 - 4,
-            self.pos.y as i32 + 50,
+            center.x as i32 - 4,
+            center.y as i32 + 50,
             15,
             Color::WHITE,
         );
     }
 
     fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 30.0, 40.0)
+        Rectangle::new(self.pos.x - 20.0, self.pos.y - 20.0, 30.0, 40.0)
     }
 }
 
@@ -991,7 +1019,11 @@ impl Device for SwitchDevice {
     }
 
     fn gui_bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 0.0, 0.0)
+        self.edit_gui.bounds()
+    }
+
+    fn is_port_up(&self, port: usize) -> bool {
+        !self.switch.port_discarding(port)
     }
 
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
@@ -1005,15 +1037,15 @@ impl Device for SwitchDevice {
         s.open_dropdown = Some(self.id);
     }
 
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, _: &mut GuiState) {
+    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
         if self.dropdown_gui.is_some() {
             let ds = self.dropdown_gui.as_mut().unwrap();
             match ds.kind {
                 DropdownKind::Edit => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5);
+                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
                     d.gui_list_view(
                         ds.bounds,
-                        Some(rstr!("Delete")),
+                        Some(rstr!("Edit;Delete")),
                         &mut ds.scroll_index,
                         &mut ds.selection,
                     );
@@ -1038,14 +1070,184 @@ impl Device for SwitchDevice {
                 }
             }
         }
+
+        let mut render_display = |ds: &mut SwitchEditGuiState, d: &mut RaylibDrawHandle| {
+            // Window
+            //----------------------------------------------
+            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
+                && ds
+                    .bounds()
+                    .check_collision_point_rec(d.get_mouse_position())
+            {
+                s.selected_window = Some(self.id); // Window engaged
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
+            }
+
+            if d.gui_window_box(
+                ds.bounds(),
+                Some(utils::rstr_from_string(self.label.clone()).as_c_str()),
+            ) {
+                return true;
+            }
+
+            if s.selected_window == Some(self.id) {
+                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
+            }
+            //----------------------------------------------
+
+            // Command Line
+            //----------------------------------------------
+            d.draw_rectangle_rec(
+                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 40.0, 280.0, 105.0),
+                Color::BLACK,
+            );
+
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
+                Color::WHITE.color_to_int(),
+            );
+
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::BASE_COLOR_PRESSED as i32,
+                Color::BLACK.color_to_int(),
+            );
+            d.gui_set_style(
+                GuiControl::TEXTBOX,
+                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
+                Color::WHITE.color_to_int(),
+            );
+
+            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + ds.pos.y + 53.0;
+            if !self.terminal.channel_open {
+                d.draw_text(
+                    "Switch %",
+                    ds.pos.x as i32 + 15,
+                    out_y as i32,
+                    10,
+                    Color::WHITE,
+                );
+            }
+
+            if !self.terminal.channel_open
+                && d.gui_text_box(
+                    Rectangle::new(ds.pos.x + 63.0, out_y - 5.0, 210.0, 20.0),
+                    &mut ds.cmd_line_buffer,
+                    s.selected_window == Some(self.id),
+                )
+                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
+            {
+                self.terminal.input(
+                    utils::array_to_string(&ds.cmd_line_buffer),
+                    &mut self.switch,
+                );
+                ds.cmd_line_out.push_back(format!(
+                    "Switch % {}",
+                    utils::array_to_string(&ds.cmd_line_buffer)
+                ));
+
+                if ds.cmd_line_out.len() > 8 {
+                    ds.cmd_line_out.pop_front();
+                }
+                ds.cmd_line_buffer = [0u8; 0xFF];
+            }
+            d.gui_load_style_default();
+
+            // Output
+            if let Some(out) = self.terminal.out() {
+                ds.cmd_line_out.push_back(out);
+            }
+
+            let mut out_y = ds.pos.y + 53.0;
+            for line in ds.cmd_line_out.iter().rev().take(7).rev() {
+                d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
+                if out_y > ds.pos.y + 150.0 {
+                    break;
+                }
+                out_y += 11.0;
+            }
+            //----------------------------------------------
+            return false;
+        };
+
+        if self.edit_gui.open {
+            if render_display(&mut self.edit_gui, d) {
+                s.open_windows.retain(|id| *id != self.id);
+                self.edit_gui.open = false;
+                return;
+            }
+
+            if self.edit_gui.drag_origin.is_some()
+                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
+            {
+                self.edit_gui.drag_origin = None;
+                return;
+            }
+
+            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+                if self.edit_gui.drag_origin.is_none()
+                    && self
+                        .edit_gui
+                        .tab_bounds()
+                        .check_collision_point_rec(d.get_mouse_position())
+                {
+                    self.edit_gui.drag_origin = Some(d.get_mouse_position() - self.edit_gui.pos);
+                }
+
+                if self.edit_gui.drag_origin.is_some() {
+                    self.edit_gui.pos = d.get_mouse_position() - self.edit_gui.drag_origin.unwrap();
+                }
+            }
+        }
     }
 
     fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
         let mut handle_edit = |ds: &DropdownGuiState| {
             // Handle dropdown clicked
             match ds.selection {
-                // Delete
+                // Edit
                 0 => {
+                    self.edit_gui.open = true;
+                    self.edit_gui.pos = rl.get_mouse_position();
+                    s.open_windows.push(self.id);
+                    return true;
+                }
+                // Delete
+                1 => {
                     self.deleted = true;
                     return true;
                 }
@@ -1128,11 +1330,19 @@ impl Storable for SwitchDevice {
         ds.adj_devices.insert(id, Vec::new());
         ds.switches.push(SwitchDevice {
             id,
-            switch: Switch::from_seed(id.as_u32() as u64, 0),
+            switch: Switch::from_seed(id.as_u32() as u64, 100),
             pos,
             label: format!("Switch {}", ds.switch_count),
             deleted: false,
             dropdown_gui: None,
+            terminal: SwitchTerminal::new(),
+            edit_gui: SwitchEditGuiState {
+                open: false,
+                pos: Vector2::zero(),
+                drag_origin: None,
+                cmd_line_buffer: [0u8; 0xFF],
+                cmd_line_out: VecDeque::new(),
+            },
         });
 
         ds.cable_sim
@@ -1226,6 +1436,10 @@ impl Device for RouterDevice {
 
     fn gui_bounds(&self) -> Rectangle {
         self.edit_gui.bounds()
+    }
+
+    fn is_port_up(&self, port: usize) -> bool {
+        self.router.is_port_up(port)
     }
 
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
@@ -1367,7 +1581,7 @@ impl Device for RouterDevice {
 
             if !self.terminal.channel_open
                 && d.gui_text_box(
-                    Rectangle::new(ds.pos.x + 70.0, out_y - 5.0, 210.0, 20.0),
+                    Rectangle::new(ds.pos.x + 63.0, out_y - 5.0, 210.0, 20.0),
                     &mut ds.cmd_line_buffer,
                     s.selected_window == Some(self.id),
                 )

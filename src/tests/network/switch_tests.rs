@@ -328,6 +328,32 @@ fn SpanningTree_FinishInit_ForwardsEndDevices() {
 }
 
 #[test]
+fn SpanningTree_OneSwitchStpEnabledOneStpUninit_ReceiveBpdus() {
+    // Arrange
+    let mut sim = CableSimulator::new();
+    let mut s1 = Switch::from_seed(1, 1);
+    let mut s2 = Switch::from_seed(35, 2);
+
+    let s1_s2_port = 0;
+    let s2_s1_port = 1;
+    s1.connect_switch(s1_s2_port, &mut s2, s2_s1_port);
+
+    sim.adds(s1.ports());
+    sim.adds(s2.ports());
+
+    // Act
+    s1.init_stp();
+    s1.forward();
+    sim.transmit();
+
+    s2.forward();
+    sim.transmit();
+
+    // Assert
+    assert!(s1.ports()[s1_s2_port].borrow().has_incoming());
+}
+
+#[test]
 fn SpanningTree_TwoConnectedFinishStp_BpdusEnd() {
     // Arrange
     let mut sim = CableSimulator::new();
