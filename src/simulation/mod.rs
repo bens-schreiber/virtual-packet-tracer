@@ -2,13 +2,17 @@ mod device;
 mod terminal;
 mod utils;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::SystemTime,
+};
 
 use device::{
     DesktopDevice, Device, DeviceId, Devices, DropdownKind, PacketEntity, RouterDevice,
     SwitchDevice,
 };
 use raylib::prelude::*;
+use utils::PacketKind;
 
 use crate::tick::TimeProvider;
 
@@ -20,7 +24,7 @@ const TRACER_MODE_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 90.0, 10
 const NEXT_TRACER_SELBOX: Rectangle = Rectangle::new(SCREEN_BOX.width - 46.0, 10.0, 37.0, 37.0);
 
 const ETHERNET_SELBOX: Rectangle = Rectangle::new(10.0, 417.0, 70.0, 70.0);
-const DISCONNECT_SELBOX: Rectangle = Rectangle::new(90.0, 417.0, 70.0, 70.0);
+const DETACH_SELBOX: Rectangle = Rectangle::new(90.0, 417.0, 70.0, 70.0);
 const DESKTOP_SELBOX: Rectangle = Rectangle::new(170.0, 417.0, 70.0, 70.0);
 const SWITCH_SELBOX: Rectangle = Rectangle::new(250.0, 417.0, 70.0, 70.0);
 const ROUTER_SELBOX: Rectangle = Rectangle::new(330.0, 417.0, 70.0, 70.0);
@@ -46,25 +50,16 @@ enum DeviceKind {
 enum GuiMode {
     Place,
     Drag,
-    Remove,
+    Detach,
     Connect,
     Select,
 }
 
-enum PacketKind {
-    Ethernet2,
-    Ethernet802_3,
-    Ipv4,
-    Arp,
-    Icmp,
-    Bbpdu,
-    Rip,
-}
-
 struct Packet {
-    origin: DeviceId,
-    destination: DeviceId,
+    last: Option<DeviceId>,
+    current: DeviceId,
     kind: PacketKind,
+    time: SystemTime,
 }
 
 struct GuiState {
@@ -83,7 +78,7 @@ struct GuiState {
     drag_device: Option<DeviceId>,
     drag_origin: Vector2,
 
-    remove_d: Option<(usize, DeviceId)>, // (port, id)
+    detach_d: Option<(usize, DeviceId)>, // (port, id)
 
     connect_d1: Option<(usize, DeviceId)>,
     connect_d2: Option<(usize, DeviceId)>,
@@ -109,7 +104,7 @@ impl Default for GuiState {
             drag_device: None,
             drag_origin: Vector2::zero(),
 
-            remove_d: None,
+            detach_d: None,
 
             connect_d1: None,
             connect_d2: None,
@@ -171,8 +166,8 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
             s.mode = GuiMode::Connect;
             return;
         }
-        if DISCONNECT_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
-            s.mode = GuiMode::Remove;
+        if DETACH_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
+            s.mode = GuiMode::Detach;
             return;
         }
         if DESKTOP_SELBOX.check_collision_point_rec(rl.get_mouse_position()) {
@@ -223,27 +218,27 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
     // Sim Controls
     //------------------------------------------------------
     match s.mode {
-        GuiMode::Remove => {
+        GuiMode::Detach => {
             if left_mouse_clicked {
                 if mouse_collision.is_none() {
-                    s.remove_d = None;
+                    s.detach_d = None;
                     return;
                 }
 
-                if s.remove_d.is_none() {
+                if s.detach_d.is_none() {
                     let e = mouse_collision.unwrap();
                     e.dropdown(DropdownKind::Connections, mouse_pos, s);
                     return;
                 }
             }
 
-            if s.remove_d.is_none() {
+            if s.detach_d.is_none() {
                 return;
             }
 
-            let (port, id) = s.remove_d.unwrap();
+            let (port, id) = s.detach_d.unwrap();
             ds.disconnect(id, port);
-            s.remove_d = None;
+            s.detach_d = None;
             return;
         }
         GuiMode::Connect => {
@@ -447,10 +442,10 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
             fixed: s.mode == GuiMode::Connect,
         },
         Selbox {
-            rec: DISCONNECT_SELBOX,
-            text: "Discon.",
+            rec: DETACH_SELBOX,
+            text: "Detach",
             icon: GuiIconName::ICON_CROSS,
-            fixed: s.mode == GuiMode::Remove,
+            fixed: s.mode == GuiMode::Detach,
         },
         Selbox {
             rec: DESKTOP_SELBOX,
@@ -520,8 +515,10 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
         return;
     }
 
-    // Columns: Last Device, At Device, Type
-    let col_width = PACKET_TABLE_SELBOX.width / 3.0;
+    // Columns: Time (ms), Last Device, At Devicee, Type
+    let type_col_width = PACKET_TABLE_SELBOX.width / 6.0; // Give less room to the "Type" column
+    let col_width = (PACKET_TABLE_SELBOX.width - type_col_width) / 3.0; // Recalculate the width of the other columns
+
     d.draw_rectangle_v(
         Vector2::new(PACKET_TABLE_SELBOX.x + col_width, PACKET_TABLE_SELBOX.y),
         Vector2::new(1.0, PACKET_TABLE_SELBOX.height),
@@ -535,24 +532,39 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
         Vector2::new(1.0, PACKET_TABLE_SELBOX.height),
         border_color,
     );
+    d.draw_rectangle_v(
+        Vector2::new(
+            PACKET_TABLE_SELBOX.x + col_width * 3.0,
+            PACKET_TABLE_SELBOX.y,
+        ),
+        Vector2::new(1.0, PACKET_TABLE_SELBOX.height),
+        border_color,
+    );
 
     d.draw_text(
-        "Last Device",
+        "Time (ms)",
         PACKET_TABLE_SELBOX.x as i32 + 10,
         PACKET_TABLE_SELBOX.y as i32 + 5,
         15,
         Color::BLACK,
     );
     d.draw_text(
-        "At Device",
+        "Last Device",
         (PACKET_TABLE_SELBOX.x + col_width) as i32 + 10,
         PACKET_TABLE_SELBOX.y as i32 + 5,
         15,
         Color::BLACK,
     );
     d.draw_text(
-        "Type",
+        "At Device",
         (PACKET_TABLE_SELBOX.x + col_width * 2.0) as i32 + 10,
+        PACKET_TABLE_SELBOX.y as i32 + 5,
+        15,
+        Color::BLACK,
+    );
+    d.draw_text(
+        "Type",
+        (PACKET_TABLE_SELBOX.x + col_width * 3.0) as i32 + 10,
         PACKET_TABLE_SELBOX.y as i32 + 5,
         15,
         Color::BLACK,
@@ -568,37 +580,48 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
         border_color,
     );
 
+    // Rows
     let mut y = PACKET_TABLE_SELBOX.y + 30.0;
     for p in s.packet_stack.iter() {
-        let last_device = ds.get(p.origin).label();
-        let at_device = ds.get(p.destination).label();
+        let time = {
+            let tp = TimeProvider::instance().lock().unwrap();
+            let elapsed = p.time.duration_since(tp.last_frozen().unwrap()).unwrap();
+            elapsed.as_millis().to_string()
+        };
+
+        let last_device = p.last.map_or("-----".to_string(), |id| ds.get(id).label());
+        let at_device = ds.get(p.current).label();
         let packet_type = match p.kind {
-            PacketKind::Ethernet2 => "Ethernet II",
-            PacketKind::Ethernet802_3 => "Ethernet 802.3",
-            PacketKind::Ipv4 => "IPv4",
-            PacketKind::Arp => "ARP",
-            PacketKind::Icmp => "ICMP",
-            PacketKind::Bbpdu => "BPDU",
-            PacketKind::Rip => "RIP",
+            PacketKind::Arp(_) => "ARP",
+            PacketKind::Bpdu(_) => "BPDU",
+            PacketKind::Rip(_) => "RIP",
+            PacketKind::Icmp(_) => "ICMP",
         };
 
         d.draw_text(
-            &last_device,
+            &time,
             PACKET_TABLE_SELBOX.x as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
         );
         d.draw_text(
-            &at_device,
+            &last_device,
             (PACKET_TABLE_SELBOX.x + col_width) as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
         );
         d.draw_text(
-            packet_type,
+            &at_device,
             (PACKET_TABLE_SELBOX.x + col_width * 2.0) as i32 + 10,
+            y as i32,
+            15,
+            Color::BLACK,
+        );
+        d.draw_text(
+            packet_type,
+            (PACKET_TABLE_SELBOX.x + col_width * 3.0) as i32 + 10,
             y as i32,
             15,
             Color::BLACK,
@@ -606,12 +629,11 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
 
         y += 20.0;
     }
-
     //----------------------------------------------
 }
 
 /// Adds the "tracer packets" (visual representation of packets) to the devices list for rendering
-fn add_tracer_packets(ds: &mut Devices) {
+fn add_tracer_packets(ds: &mut Devices, s: &mut GuiState) {
     let mut packets = vec![];
     for (id, adjs) in ds.adj_devices.iter() {
         let e = ds.get(*id);
@@ -642,6 +664,34 @@ fn add_tracer_packets(ds: &mut Devices) {
             } else {
                 PacketEntity::ingress(origin) // egress means this device is sending to the next device next frame, queue it up
             });
+
+            // Add the packet to the packet stack
+            let data = {
+                let (ing, egr) = e.sniff(port);
+                if ingress {
+                    ing
+                } else {
+                    egr
+                }
+            };
+
+            for d in data {
+                let kind = utils::determine_packet_kind(&d);
+                let time = {
+                    let tp = TimeProvider::instance().lock().unwrap();
+                    tp.now()
+                };
+                s.packet_stack.push(Packet {
+                    last: if kind.source_mac() == e.mac_addr(port) {
+                        None
+                    } else {
+                        Some(port_id_lookup.get(&port).unwrap().clone())
+                    },
+                    current: *id,
+                    kind,
+                    time,
+                });
+            }
         }
     }
 
@@ -693,7 +743,7 @@ pub fn run() {
     while !rl.window_should_close() {
         // In tracer mode, after the next button has been clicked, add the tracer packets to the render list
         if s.tracer_mode && s.tracer_next {
-            add_tracer_packets(&mut ds);
+            add_tracer_packets(&mut ds, &mut s);
         }
 
         // Update all devices by calling their `tick`. In tracer mode, only `tick` after the next button has been clicked

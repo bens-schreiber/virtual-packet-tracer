@@ -26,6 +26,23 @@ macro_rules! is_ipv4_multicast_or_broadcast {
     }};
 }
 
+pub enum Ipv4Protocol {
+    Icmp = 1,
+    Rip = 17,
+    Test = 255,
+}
+
+impl From<u8> for Ipv4Protocol {
+    fn from(item: u8) -> Self {
+        match item {
+            1 => Ipv4Protocol::Icmp,
+            17 => Ipv4Protocol::Rip,
+            255 => Ipv4Protocol::Test,
+            _ => panic!("Invalid Ipv4 protocol"),
+        }
+    }
+}
+
 /// A network layer frame for IPv4 communication
 #[derive(Debug, PartialEq)]
 pub struct Ipv4Frame {
@@ -49,8 +66,8 @@ impl Ipv4Frame {
         destination: Ipv4Address,
         ttl: u8,
         data: Vec<u8>,
-        icmp: bool,
-    ) -> Ipv4Frame {
+        protocol: Ipv4Protocol,
+    ) -> Self {
         Ipv4Frame {
             version_hlen: 0x45, // Ipv4, 5 words
             tos: 0,
@@ -58,13 +75,17 @@ impl Ipv4Frame {
             id: 0,
             flags_fragment_offset: 0,
             ttl,
-            protocol: if icmp { 1 } else { 0 }, // 1 icmp 0 tcp
-            checksum: 0,                        // TODO: Calculate checksum
+            protocol: protocol as u8,
+            checksum: 0, // TODO: Calculate checksum
             source,
             destination,
             option: Vec::new(),
             data,
         }
+    }
+
+    pub fn test(source: Ipv4Address, destination: Ipv4Address, ttl: u8, data: u8) -> Self {
+        Ipv4Frame::new(source, destination, ttl, vec![data], Ipv4Protocol::Test)
     }
 }
 

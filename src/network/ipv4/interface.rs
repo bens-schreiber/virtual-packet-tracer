@@ -154,6 +154,7 @@ impl Ipv4Interface {
     /// * `proxied_destination` - The destination that the mac address will be resolved to, if different from the destination.
     /// * `ttl` - Time to live of the frame.
     /// * `data` - Byte data to send in the frame.
+    /// * `protocol` - The Ipv4 protocol of the frame.
     ///
     /// # Remarks
     /// Will send an ARP request if the destination MAC address is not in the ARP table.
@@ -178,10 +179,10 @@ impl Ipv4Interface {
         proxied_destination: Option<Ipv4Address>,
         ttl: u8,
         data: Vec<u8>,
-        icmp: bool,
+        protocol: Ipv4Protocol,
     ) -> Result<bool, &'static str> {
         if destination == localhost!() || destination == self.ip_address {
-            let frame = Ipv4Frame::new(source, destination, ttl, data, icmp);
+            let frame = Ipv4Frame::new(source, destination, ttl, data, protocol);
             self.ethernet
                 .send(self.ethernet.mac_address, EtherType::Ipv4, frame.to_bytes());
             return Ok(true);
@@ -193,7 +194,7 @@ impl Ipv4Interface {
             proxied_destination.or(self.default_gateway)
         };
 
-        let frame = Ipv4Frame::new(source, destination, ttl, data, icmp);
+        let frame = Ipv4Frame::new(source, destination, ttl, data, protocol);
 
         if key.is_none() {
             if self.router_interface {
@@ -225,6 +226,7 @@ impl Ipv4Interface {
     /// Defaults to a Ipv4 TTL of 64.
     /// * `destination` - The destination IP address to send the data to.
     /// * `data` - Byte data to send in the frame.
+    /// * `protocol` - The Ipv4 protocol of the frame.
     ///
     /// # Remarks
     /// Will send an ARP request if the destination MAC address is not in the ARP table.
@@ -237,19 +239,24 @@ impl Ipv4Interface {
     /// # Returns
     /// True if the address was found in the ARP table and the frame was sent, false if buffering the frame.
     /// Err if the destination is unreachable (no default gateway).
-    pub fn send(&mut self, destination: Ipv4Address, data: Vec<u8>) -> Result<bool, &'static str> {
-        self.sendv(self.ip_address, destination, None, 64, data, false)
+    pub fn send(
+        &mut self,
+        destination: Ipv4Address,
+        data: Vec<u8>,
+        protocol: Ipv4Protocol,
+    ) -> Result<bool, &'static str> {
+        self.sendv(self.ip_address, destination, None, 64, data, protocol)
     }
 
     /// Sends data to the multicast address.
     /// * `data` - Byte data to send in the frame.
-    pub fn multicast(&mut self, data: Vec<u8>) {
+    pub fn multicast(&mut self, data: Vec<u8>, protocol: Ipv4Protocol) {
         let frame = Ipv4Frame::new(
             self.ip_address,
             ipv4_multicast_addr!(),
             64,
             data.clone(),
-            false,
+            protocol,
         );
         self.ethernet
             .send(mac_multicast_addr!(), EtherType::Ipv4, frame.to_bytes());
@@ -283,8 +290,14 @@ impl Ipv4Interface {
             None,
             64,
             icmp_frame.to_bytes(),
-            true,
+            Ipv4Protocol::Icmp,
         )
+    }
+
+    #[cfg(test)]
+    pub fn send_t(&mut self, destination: Ipv4Address, data: u8) {
+        self.send(destination, vec![data], Ipv4Protocol::Test)
+            .unwrap();
     }
 
     /// Receives data from the ethernet interface. Processes ARP frames to the ARP table.

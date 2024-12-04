@@ -10,11 +10,14 @@ use raylib::{
 };
 
 use crate::{
-    network::device::{
-        cable::{CableSimulator, EthernetPort},
-        desktop::Desktop,
-        router::Router,
-        switch::Switch,
+    network::{
+        device::{
+            cable::{CableSimulator, EthernetPort},
+            desktop::Desktop,
+            router::Router,
+            switch::Switch,
+        },
+        ethernet::MacAddress,
     },
     tick::Tickable,
 };
@@ -58,6 +61,8 @@ pub trait Storable {
 pub trait Device: Entity + Storable {
     fn id(&self) -> DeviceId;
 
+    fn mac_addr(&self, port: usize) -> MacAddress;
+
     fn label(&self) -> String;
 
     fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState);
@@ -70,6 +75,8 @@ pub trait Device: Entity + Storable {
 
     /// Returns all ports in the ports list that have egress and ingress traffic
     fn traffic(&self, ports: Vec<usize>) -> Vec<(usize, bool)>; // (Port, Ingress)
+
+    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>); // (Ingress, Egress)
 
     /// Bounds of the edit window
     fn gui_bounds(&self) -> Rectangle;
@@ -538,6 +545,10 @@ impl Device for DesktopDevice {
         self.id
     }
 
+    fn mac_addr(&self, _: usize) -> MacAddress {
+        self.desktop.interface.ethernet.mac_address
+    }
+
     fn label(&self) -> String {
         self.label.clone()
     }
@@ -548,6 +559,10 @@ impl Device for DesktopDevice {
 
     fn is_port_up(&self, _: usize) -> bool {
         true // desktop physical ports are always up (for now)
+    }
+
+    fn sniff(&self, _: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        self.desktop.interface.ethernet.port().borrow().sniff()
     }
 
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
@@ -854,8 +869,8 @@ impl Device for DesktopDevice {
                                 s.connect_d2 = Some((0, self.id));
                             }
                         }
-                        GuiMode::Remove => {
-                            s.remove_d = Some((0, self.id));
+                        GuiMode::Detach => {
+                            s.detach_d = Some((0, self.id));
                         }
                         _ => {}
                     }
@@ -1024,6 +1039,10 @@ impl Device for SwitchDevice {
         self.id
     }
 
+    fn mac_addr(&self, port: usize) -> MacAddress {
+        self.switch.mac_addr(port)
+    }
+
     fn label(&self) -> String {
         self.label.clone()
     }
@@ -1033,7 +1052,11 @@ impl Device for SwitchDevice {
     }
 
     fn is_port_up(&self, port: usize) -> bool {
-        !self.switch.port_discarding(port)
+        !self.switch.port_state(port)
+    }
+
+    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        self.switch.ports()[port].borrow().sniff()
     }
 
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
@@ -1282,8 +1305,8 @@ impl Device for SwitchDevice {
                         s.connect_d2 = Some((selection, self.id));
                     }
                 }
-                GuiMode::Remove => {
-                    s.remove_d = Some((selection, self.id));
+                GuiMode::Detach => {
+                    s.detach_d = Some((selection, self.id));
                 }
                 _ => {}
             }
@@ -1444,6 +1467,10 @@ impl Device for RouterDevice {
         self.id
     }
 
+    fn mac_addr(&self, port: usize) -> MacAddress {
+        self.router.mac_addr(port)
+    }
+
     fn label(&self) -> String {
         self.label.clone()
     }
@@ -1454,6 +1481,10 @@ impl Device for RouterDevice {
 
     fn is_port_up(&self, port: usize) -> bool {
         self.router.is_port_up(port)
+    }
+
+    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        self.router.ports()[port].borrow().sniff()
     }
 
     fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
@@ -1702,8 +1733,8 @@ impl Device for RouterDevice {
                         s.connect_d2 = Some((selection, self.id));
                     }
                 }
-                GuiMode::Remove => {
-                    s.remove_d = Some((selection, self.id));
+                GuiMode::Detach => {
+                    s.detach_d = Some((selection, self.id));
                 }
                 _ => {}
             }
