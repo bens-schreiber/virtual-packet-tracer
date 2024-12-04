@@ -58,6 +58,8 @@ pub trait Storable {
 pub trait Device: Entity + Storable {
     fn id(&self) -> DeviceId;
 
+    fn label(&self) -> String;
+
     fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState);
 
     /// Handle clicking on any entity gui, ie dropdown or edit window
@@ -534,6 +536,10 @@ impl Entity for DesktopDevice {
 impl Device for DesktopDevice {
     fn id(&self) -> DeviceId {
         self.id
+    }
+
+    fn label(&self) -> String {
+        self.label.clone()
     }
 
     fn gui_bounds(&self) -> Rectangle {
@@ -1018,6 +1024,10 @@ impl Device for SwitchDevice {
         self.id
     }
 
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
     fn gui_bounds(&self) -> Rectangle {
         self.edit_gui.bounds()
     }
@@ -1432,6 +1442,10 @@ impl Entity for RouterDevice {
 impl Device for RouterDevice {
     fn id(&self) -> DeviceId {
         self.id
+    }
+
+    fn label(&self) -> String {
+        self.label.clone()
     }
 
     fn gui_bounds(&self) -> Rectangle {

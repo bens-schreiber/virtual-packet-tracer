@@ -51,6 +51,22 @@ enum GuiMode {
     Select,
 }
 
+enum PacketKind {
+    Ethernet2,
+    Ethernet802_3,
+    Ipv4,
+    Arp,
+    Icmp,
+    Bbpdu,
+    Rip,
+}
+
+struct Packet {
+    origin: DeviceId,
+    destination: DeviceId,
+    kind: PacketKind,
+}
+
 struct GuiState {
     mode: GuiMode,
 
@@ -71,6 +87,8 @@ struct GuiState {
 
     connect_d1: Option<(usize, DeviceId)>,
     connect_d2: Option<(usize, DeviceId)>,
+
+    packet_stack: Vec<Packet>,
 }
 
 impl Default for GuiState {
@@ -95,6 +113,8 @@ impl Default for GuiState {
 
             connect_d1: None,
             connect_d2: None,
+
+            packet_stack: vec![],
         }
     }
 }
@@ -321,7 +341,7 @@ struct Selbox {
 }
 
 /// The bottom panel GUI controls
-fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
+fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
     let border_color = Color::get_color(d.gui_get_style(
         GuiControl::STATUSBAR,
         GuiControlProperty::BORDER_COLOR_DISABLED as i32,
@@ -487,7 +507,6 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
     //----------------------------------------------
     d.draw_rectangle_rec(PACKET_TABLE_SELBOX, Color::GRAY.alpha(0.1));
 
-    // center text in the middle of the box
     if !s.tracer_mode {
         let text = "Packet Tracer Stopped";
         let text_len = text.len() as f32 * 4.5;
@@ -498,9 +517,97 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, s: &mut GuiState) {
             16,
             Color::BLACK.alpha(0.3),
         );
+        return;
     }
 
-    //
+    // Columns: Last Device, At Device, Type
+    let col_width = PACKET_TABLE_SELBOX.width / 3.0;
+    d.draw_rectangle_v(
+        Vector2::new(PACKET_TABLE_SELBOX.x + col_width, PACKET_TABLE_SELBOX.y),
+        Vector2::new(1.0, PACKET_TABLE_SELBOX.height),
+        border_color,
+    );
+    d.draw_rectangle_v(
+        Vector2::new(
+            PACKET_TABLE_SELBOX.x + col_width * 2.0,
+            PACKET_TABLE_SELBOX.y,
+        ),
+        Vector2::new(1.0, PACKET_TABLE_SELBOX.height),
+        border_color,
+    );
+
+    d.draw_text(
+        "Last Device",
+        PACKET_TABLE_SELBOX.x as i32 + 10,
+        PACKET_TABLE_SELBOX.y as i32 + 5,
+        15,
+        Color::BLACK,
+    );
+    d.draw_text(
+        "At Device",
+        (PACKET_TABLE_SELBOX.x + col_width) as i32 + 10,
+        PACKET_TABLE_SELBOX.y as i32 + 5,
+        15,
+        Color::BLACK,
+    );
+    d.draw_text(
+        "Type",
+        (PACKET_TABLE_SELBOX.x + col_width * 2.0) as i32 + 10,
+        PACKET_TABLE_SELBOX.y as i32 + 5,
+        15,
+        Color::BLACK,
+    );
+
+    d.draw_line_ex(
+        Vector2::new(PACKET_TABLE_SELBOX.x, PACKET_TABLE_SELBOX.y + 25.0),
+        Vector2::new(
+            PACKET_TABLE_SELBOX.x + PACKET_TABLE_SELBOX.width,
+            PACKET_TABLE_SELBOX.y + 25.0,
+        ),
+        1.0,
+        border_color,
+    );
+
+    let mut y = PACKET_TABLE_SELBOX.y + 30.0;
+    for p in s.packet_stack.iter() {
+        let last_device = ds.get(p.origin).label();
+        let at_device = ds.get(p.destination).label();
+        let packet_type = match p.kind {
+            PacketKind::Ethernet2 => "Ethernet II",
+            PacketKind::Ethernet802_3 => "Ethernet 802.3",
+            PacketKind::Ipv4 => "IPv4",
+            PacketKind::Arp => "ARP",
+            PacketKind::Icmp => "ICMP",
+            PacketKind::Bbpdu => "BPDU",
+            PacketKind::Rip => "RIP",
+        };
+
+        d.draw_text(
+            &last_device,
+            PACKET_TABLE_SELBOX.x as i32 + 10,
+            y as i32,
+            15,
+            Color::BLACK,
+        );
+        d.draw_text(
+            &at_device,
+            (PACKET_TABLE_SELBOX.x + col_width) as i32 + 10,
+            y as i32,
+            15,
+            Color::BLACK,
+        );
+        d.draw_text(
+            packet_type,
+            (PACKET_TABLE_SELBOX.x + col_width * 2.0) as i32 + 10,
+            y as i32,
+            15,
+            Color::BLACK,
+        );
+
+        y += 20.0;
+    }
+
+    //----------------------------------------------
 }
 
 /// Adds the "tracer packets" (visual representation of packets) to the devices list for rendering
@@ -639,7 +746,7 @@ pub fn run() {
         }
 
         ds.render(&mut d, &mut s);
-        draw_gui_controls(&mut d, &mut s);
+        draw_gui_controls(&mut d, &ds, &mut s);
         d.clear_background(Color::BLACK);
     }
 }
