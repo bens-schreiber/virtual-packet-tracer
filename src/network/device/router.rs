@@ -67,7 +67,7 @@ impl Router {
         let ports: [RefCell<RouterPort>; 8] = (0..8)
             .map(|i| {
                 RefCell::new(RouterPort {
-                    interface: RefCell::new(Ipv4Interface::router_interface(
+                    interface: RefCell::new(Ipv4Interface::new_router_interface(
                         mac_addr!(mac_seed + i),
                         [0, 0, 0, 0],
                         [0, 0, 0, 0],
