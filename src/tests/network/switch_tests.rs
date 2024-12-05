@@ -389,6 +389,8 @@ fn SpanningTree_TwoConnectedFinishStp_ElectsRootPortAndDesignatedPort() {
     s1.forward();
     s2.forward();
     sim.transmit();
+    s1.forward();
+    s2.forward();
     s1.finish_init_stp();
     s2.finish_init_stp();
 
@@ -615,7 +617,7 @@ fn stp_complete_network() -> (
 }
 
 #[test]
-fn SpanningTree_CompleteGraph_ElectsRootPortAndDesignatedPortsAndDisabledPorts() {
+fn SpanningTree_CompleteGraph_BlocksPort() {
     // Arrange
     let (
         _,
@@ -801,7 +803,7 @@ fn SpanningTree_ExistingNetworkRecieveTcnBpdu_UpdateRoot() {
 }
 
 #[test]
-fn SpanningTree_TwoSwitchesDisconnectedRootPort_ElectSelfAsRootBridge() {
+fn SpanningTree_DisconnectedRootPort_ElectSelfAsRootBridge() {
     // Arrange
     let mut sim = CableSimulator::new();
     let mut s1 = Switch::from_seed(1, 1);
@@ -871,4 +873,50 @@ fn SpanningTree_CompleteNetworkDisconnectRootPort_ElectsNewRoot() {
     assert_eq!(s3.root_bid(), s2.bid());
     assert_eq!(s3.root_port(), Some(s3_s2_port));
     assert_eq!(s3.discarding_ports().len(), 0);
+}
+//                          s1
+//                      (DP)   (DP)
+//                      /         \
+//                  (RP)           (RP)
+//                   s2 (DP)----(BP) s3
+#[test]
+fn SpanningTree_RemoveRedundancy_UnblocksPort() {
+    // Arrange
+    let (
+        mut sim,
+        mut s1,
+        mut s2,
+        mut s3,
+        _,
+        _,
+        (s1_s2_port, s1_s3_port, s2_s1_port, s2_s3_port, s3_s1_port, s3_s2_port),
+    ) = stp_complete_network();
+
+    // Act
+    s2.disconnect(s2_s1_port);
+
+    for _ in 0..3 {
+        sim.transmit();
+        s1.forward();
+        s2.forward();
+        s3.forward();
+    }
+
+    // Assert
+    assert!(s1.is_root_bridge());
+    assert!(s1.root_port().is_none());
+    assert!(
+        s1.designated_ports().contains(&s1_s2_port) && s1.designated_ports().contains(&s1_s3_port)
+    );
+    assert_eq!(s1.discarding_ports().len(), 0);
+
+    assert_eq!(s2.root_bid(), s1.bid());
+    assert_eq!(s2.root_port(), Some(s2_s3_port));
+    assert!(!s2.designated_ports().contains(&s2_s3_port));
+    assert_eq!(s2.discarding_ports().len(), 0);
+
+    assert_eq!(s3.root_bid(), s1.bid());
+    assert_eq!(s3.root_port(), Some(s3_s1_port));
+    assert!(s3.designated_ports().contains(&s3_s2_port));
+    assert!(s3.discarding_ports().is_empty());
 }

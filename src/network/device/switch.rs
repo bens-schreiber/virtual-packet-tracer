@@ -30,8 +30,10 @@ struct SwitchPort {
     stp_state: StpState,
     stp_role: Option<StpRole>, // None if the port hasn't initialized its role yet
     id: usize,
-    root_cost: u32,   // 0 for the root bridge or if the port hasn't received a BPDU
-    bid: Option<u64>, // The bridge ID of the connected port. None if the port has never received a BPDU.
+    root_cost: u32, // 0 for the root bridge or if the port hasn't received a BPDU
+    connected_root_bid: Option<u64>, // The root bridge ID of the connected port. None if the port has never received a BPDU.
+    connected_bid: Option<u64>, // The bridge ID of the connected port. None if the port has never received a BPDU.
+    connected_role: Option<StpRole>, // The inferred role from the last BPDU received
 }
 
 #[derive(Hash, Eq, PartialEq, Clone)]
@@ -72,7 +74,7 @@ impl Switch {
     /// ```
     /// This will create a switch with the switch's MAC address as `mac_addr!(1)` and the interfaces MAC addresses as `mac_addr!(2)` through `mac_addr!(33)`.
     /// The switch will have a bridge priority of 1.
-    pub fn from_seed(mac_seed: u64, bridge_priority: u16) -> Switch {
+    pub fn from_seed(mac_seed: u64, bridge_priority: u16) -> Self {
         let ports: [RefCell<SwitchPort>; 32] = (0..32)
             .map(|i| {
                 RefCell::new(SwitchPort {
@@ -81,14 +83,16 @@ impl Switch {
                     stp_role: None,
                     id: i as usize,
                     root_cost: 0,
-                    bid: None,
+                    connected_root_bid: None,
+                    connected_bid: None,
+                    connected_role: None,
                 })
             })
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();
 
-        Switch {
+        Self {
             ports,
             table: HashMap::new(),
             bridge_priority,
@@ -329,7 +333,7 @@ impl Switch {
         );
 
         for stp_port in self.ports.iter() {
-            if !flood_to_all && stp_port.borrow().bid.is_none() {
+            if !flood_to_all && stp_port.borrow().connected_bid.is_none() {
                 continue;
             }
 
@@ -374,7 +378,7 @@ impl Switch {
     /// Opens all ports that haven't acted in the STP process to the Forwarding state.
     pub fn finish_init_stp(&mut self) {
         for stp_port in self.ports.iter() {
-            if stp_port.borrow().bid.is_none() {
+            if stp_port.borrow().connected_bid.is_none() {
                 stp_port.borrow_mut().stp_role = Some(StpRole::Designated);
                 stp_port.borrow_mut().stp_state = StpState::Forwarding;
             }
@@ -412,7 +416,7 @@ impl Switch {
             // By default, the port will be designated and forwarding with no BID and root cost-- meaning it's an edge port.
             sp.stp_role = Some(StpRole::Designated);
             sp.stp_state = StpState::Forwarding;
-            sp.bid = None;
+            sp.connected_bid = None;
             sp.root_cost = 0;
 
             prev_role
@@ -448,6 +452,8 @@ impl Switch {
                 sp.stp_role = Some(StpRole::Designated);
                 sp.stp_state = StpState::Forwarding;
                 sp.root_cost = 0;
+                sp.connected_bid = None;
+                sp.connected_role = None;
             }
 
             self._send_bpdus(true, true, true);
@@ -460,83 +466,41 @@ impl Switch {
 
     fn _receive_bpdu(&mut self, bpdu: BpduFrame, port_id: usize) {
         self.received_bpdu[port_id] = true;
-        let prev_root_bid = self.root_bid;
+        let mut root_changed = false;
         {
             let mut sp = self.ports[port_id].borrow_mut();
-            sp.bid = Some(bpdu.bid);
+            sp.connected_root_bid = Some(bpdu.root_bid);
+            sp.connected_bid = Some(bpdu.bid);
+            sp.connected_role = bpdu.stp_role();
+            sp.root_cost = bpdu.root_cost + 1;
 
-            let cmpr_root_bids = Switch::compare_bids(self.root_bid, bpdu.root_bid);
+            match Switch::compare_bids(self.root_bid, bpdu.root_bid) {
+                Some(true) => {
+                    let bpdu = BpduFrame::hello(
+                        self.mac_address,
+                        self.root_bid,
+                        self.root_cost,
+                        self.bid(),
+                        port_id,
+                    );
+                    sp.interface
+                        .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
 
-            // Incoming BPDUs root is worse, send an outgoing hello BPDU
-            if cmpr_root_bids == Some(true) {
-                let bpdu = BpduFrame::hello(
-                    self.mac_address,
-                    self.root_bid,
-                    self.root_cost,
-                    self.bid(),
-                    port_id,
-                );
-                sp.interface
-                    .send8023(crate::mac_bpdu_addr!(), bpdu.to_bytes());
-
-                // On the root bridge, all ports are designated forwarding ports
-                if self.is_root_bridge() {
-                    sp.stp_role = Some(StpRole::Designated);
-                    sp.stp_state = StpState::Forwarding;
-                    sp.root_cost = 0;
-                }
-
-                return; // No need to recalculate roles if the root bridge is worse (assume everything is wrong on the other side)
-            }
-
-            // Equivalent root bridges
-            if cmpr_root_bids.is_none() {
-                if self.is_root_bridge() {
-                    sp.stp_role = Some(StpRole::Designated);
-                    sp.stp_state = StpState::Forwarding;
-                    sp.root_cost = 0;
-                    return; // Roles are always designated forwarding, no further calculations needed
-                }
-
-                // Roots are equivalent, but who has the best root cost?
-                let cmpr_bids = Switch::compare_bids(bpdu.bid, self.bid());
-                if bpdu.root_cost + 1 < self.root_cost {
-                    sp.stp_role = Some(StpRole::Root);
-                    sp.stp_state = StpState::Forwarding;
-                    self.root_cost = bpdu.root_cost + 1;
-                    self.root_port = Some(port_id);
-                }
-                // Tiebreaker: Root costs are the same, the switch with the lower BID wins.
-                else if bpdu.root_cost + 1 == self.root_cost && cmpr_bids == Some(true) {
-                    sp.stp_role = Some(StpRole::Root);
-                    sp.stp_state = StpState::Forwarding;
-                    self.root_port = Some(port_id);
-                }
-                // Cost is worse, but should this be a backup port?
-                else if sp.stp_role != Some(StpRole::Root) {
-                    sp.root_cost = bpdu.root_cost + 1;
-
-                    // Redundancy: designated to designated
-                    if bpdu.is_designated()
-                        && cmpr_bids.is_some_and(|bpdu_is_better| bpdu_is_better)
-                    {
-                        sp.stp_role = Some(StpRole::Backup);
-                        sp.stp_state = StpState::Discarding;
+                    if self.is_root_bridge() {
+                        sp.stp_role = Some(StpRole::Designated);
+                        sp.stp_state = StpState::Forwarding;
                     }
+
                     return;
                 }
-            }
-            // Incoming BPDUs root is better
-            else if cmpr_root_bids.is_some_and(|better| !better) {
-                sp.stp_role = Some(StpRole::Root);
-                sp.stp_state = StpState::Forwarding;
-                self.root_bid = bpdu.root_bid; // Root changed
-                self.root_cost = bpdu.root_cost + 1;
-                self.root_port = Some(port_id);
+                Some(false) => {
+                    self.root_bid = bpdu.root_bid;
+                    root_changed = true;
+                }
+                _ => {}
             }
         }
 
-        let root_changed = self.root_bid != prev_root_bid;
         self._calculate_port_roles(root_changed);
 
         if root_changed {
@@ -545,62 +509,153 @@ impl Switch {
     }
 
     fn _calculate_port_roles(&mut self, root_changed: bool) {
-        // Determine the minimum cost path to the root bridge for each network segment
-        let mut network_segment_to_port: HashMap<u64, usize> = HashMap::new();
-        for stp_port in self.ports.iter() {
-            let mut sp = stp_port.borrow_mut();
-            if sp.bid.is_none() || sp.id == self.root_port.unwrap() {
-                continue;
+        if self.is_root_bridge() {
+            if !root_changed {
+                return; // No recalculations needed if this is the root bridge and the root hasn't changed
             }
 
-            sp.root_cost = std::cmp::max(sp.root_cost, self.root_cost); // Cost cannot be less than the root cost
-
-            if let Some(min_port_id) = network_segment_to_port.get(&sp.bid.unwrap()) {
-                let bid = sp.bid.unwrap();
-                let min_bid = self.ports[*min_port_id].borrow().bid.unwrap();
-                let min_cost = self.ports[*min_port_id].borrow().root_cost;
-
-                let is_min = {
-                    if !root_changed && min_cost != sp.root_cost {
-                        sp.root_cost < self.ports[*min_port_id].borrow().root_cost
-                    }
-                    // Tiebreaker: Compare by port number if the bids are equivalent
-                    else if bid == min_bid {
-                        sp.id > *min_port_id
-                    }
-                    // Tiebreaker: Compare by bid if the costs are equal
-                    else {
-                        Switch::compare_bids(bid, min_bid).unwrap()
-                    }
-                };
-
-                if is_min {
-                    network_segment_to_port.insert(bid, sp.id);
-                }
-
-                continue;
+            // Root is simple: All ports are designated and forwarding
+            for stp_port in self.ports.iter() {
+                let mut sp = stp_port.borrow_mut();
+                sp.stp_role = Some(StpRole::Designated);
+                sp.stp_state = StpState::Forwarding;
             }
-
-            network_segment_to_port.insert(sp.bid.unwrap(), sp.id);
+            return;
         }
 
+        fn find_root_port(
+            ports: &mut [RefCell<SwitchPort>; 32],
+            root_bid: u64,
+        ) -> (u32, u64, usize) {
+            // Determine the root port
+            let mut root_port: Option<(u32, u64, usize)> = None; // (root_cost, bid, port_id)
+            for stp_port in ports.iter() {
+                let sp = stp_port.borrow();
+                if !sp.connected_root_bid.is_some_and(|bid| bid == root_bid)
+                    || sp.connected_bid.is_none()
+                {
+                    continue;
+                }
+
+                if let Some((root_cost, bid, _)) = root_port {
+                    if sp.root_cost > root_cost {
+                        continue;
+                    }
+
+                    let compare = Switch::compare_bids(sp.connected_bid.unwrap(), bid)
+                        .expect("Bids are equivalent");
+                    if sp.root_cost < root_cost || compare {
+                        root_port = Some((sp.root_cost, sp.connected_bid.unwrap(), sp.id));
+                    }
+                    continue;
+                }
+
+                if let Some(connected_bid) = sp.connected_bid {
+                    root_port = Some((sp.root_cost, connected_bid, sp.id));
+                }
+            }
+
+            root_port.expect("No root port found")
+        }
+
+        fn find_network_segments(
+            ports: &mut [RefCell<SwitchPort>; 32],
+            root_port_id: usize,
+            root_cost: u32,
+            root_changed: bool,
+        ) -> HashMap<u64, usize> {
+            let mut segment_to_port: HashMap<u64, usize> = HashMap::new();
+            for stp_port in ports.iter() {
+                let mut sp = stp_port.borrow_mut();
+                if sp.connected_bid.is_none() || sp.id == root_port_id {
+                    continue;
+                }
+
+                sp.root_cost = std::cmp::max(sp.root_cost, root_cost); // Cost cannot be less than the root cost
+
+                if let Some(min_port_id) = segment_to_port.get(&sp.connected_bid.unwrap()) {
+                    let bid = sp.connected_bid.unwrap();
+                    let min_bid = ports[*min_port_id].borrow().connected_bid.unwrap();
+                    let min_cost = ports[*min_port_id].borrow().root_cost;
+
+                    let is_min = {
+                        if !root_changed && min_cost != sp.root_cost {
+                            sp.root_cost < ports[*min_port_id].borrow().root_cost
+                        }
+                        // Tiebreaker: Compare by port number if the bids are equivalent
+                        else if bid == min_bid {
+                            sp.id > *min_port_id
+                        }
+                        // Tiebreaker: Compare by bid if the costs are equal
+                        else {
+                            Switch::compare_bids(bid, min_bid).expect("Bids are equivalent")
+                        }
+                    };
+
+                    if is_min {
+                        segment_to_port.insert(bid, sp.id);
+                    }
+
+                    continue;
+                }
+                segment_to_port.insert(sp.connected_bid.unwrap(), sp.id);
+            }
+            segment_to_port
+        }
+
+        let (root_cost, _, root_port_id) = find_root_port(&mut self.ports, self.root_bid);
+        self.root_port = Some(root_port_id);
+        self.root_cost = root_cost;
+        self.ports[root_port_id].borrow_mut().stp_role = Some(StpRole::Root);
+        self.ports[root_port_id].borrow_mut().stp_state = StpState::Forwarding;
+
+        let segment_to_port =
+            find_network_segments(&mut self.ports, root_port_id, root_cost, root_changed);
+
         for stp_port in self.ports.iter() {
             let mut sp = stp_port.borrow_mut();
 
-            if sp.id == self.root_port.unwrap() || sp.bid.is_none() {
-                continue; // Root is already assigned, or the port doesn't participate in STP
+            if sp.connected_bid.is_none()
+                || sp.connected_role.is_none()
+                || sp.id == self.root_port.unwrap()
+            {
+                continue; // Port doesnt participate in STP, or is the root port
             }
 
-            let bid = sp.bid.unwrap();
+            let bid = sp.connected_bid.unwrap();
             if bid == self.root_bid {
                 sp.stp_role = Some(StpRole::Alternate);
                 sp.stp_state = StpState::Discarding;
-            } else if !network_segment_to_port.contains_key(&bid) {
+            } else if !segment_to_port.contains_key(&bid) {
                 sp.stp_role = Some(StpRole::Backup);
                 sp.stp_state = StpState::Discarding;
-            } else if !sp.stp_role.is_some_and(|r| r == StpRole::Backup) || root_changed {
+            } else {
                 sp.stp_role = Some(StpRole::Designated);
                 sp.stp_state = StpState::Forwarding;
+            }
+
+            let conn_role = sp.connected_role.unwrap();
+            // Never block another switches root port
+            if conn_role == StpRole::Root {
+                sp.stp_role = Some(StpRole::Designated);
+                sp.stp_state = StpState::Forwarding;
+            }
+            // Designated to designated is a redundancy
+            else if conn_role == StpRole::Designated && sp.stp_role == Some(StpRole::Designated) {
+                // Only one of the switches has to block.
+                let compare = Switch::compare_bids(self.bid(), bid);
+                match compare {
+                    Some(true) => {
+                        continue; // This switch wins, stay designated
+                    }
+                    Some(false) => {
+                        sp.stp_role = Some(StpRole::Backup);
+                        sp.stp_state = StpState::Discarding;
+                    }
+                    None => {
+                        todo!("Further tiebreakers. Will not occur in simulation.");
+                    }
+                }
             }
         }
     }
@@ -617,7 +672,8 @@ impl Tickable for Switch {
 
                     // Find links that are down, (max age = 6 seconds)
                     for i in 0..32 {
-                        if !self.received_bpdu[i] && self.ports[i].borrow().bid.is_some() {
+                        if !self.received_bpdu[i] && self.ports[i].borrow().connected_bid.is_some()
+                        {
                             self.missed_hellos[i] += 1;
                             if self.missed_hellos[i] >= 3 {
                                 self.rstp_disconnect(i);
@@ -732,10 +788,10 @@ impl BpduFrame {
         root_cost: u32,
         bid: u64,
         port: u16,
-    ) -> BpduFrame {
+    ) -> Self {
         let bpdu_type = if config_type { 0x02 } else { 0x00 };
 
-        BpduFrame {
+        Self {
             destination_address,
             source_address,
             protocol_id: 0x0000, // RSTP/STP
@@ -761,8 +817,8 @@ impl BpduFrame {
         root_cost: u32,
         bid: u64,
         port: usize,
-    ) -> BpduFrame {
-        BpduFrame::new(
+    ) -> Self {
+        Self::new(
             crate::mac_bpdu_addr!(),
             source_address,
             false,
@@ -774,13 +830,19 @@ impl BpduFrame {
         )
     }
 
-    pub fn is_designated(&self) -> bool {
-        (self.flags & 0b0000_1100) == (1 << 2)
+    fn stp_role(&self) -> Option<StpRole> {
+        match (self.flags & 0b0000_1100) >> 2 {
+            0 => Some(StpRole::Root),
+            1 => Some(StpRole::Designated),
+            2 => Some(StpRole::Alternate),
+            3 => Some(StpRole::Backup),
+            _ => None,
+        }
     }
 }
 
 impl ByteSerialize for BpduFrame {
-    fn from_bytes(bytes: Vec<u8>) -> Result<BpduFrame, std::io::Error> {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
         if bytes.len() < 35 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -803,7 +865,7 @@ impl ByteSerialize for BpduFrame {
         let hello_time = u16::from_be_bytes(bytes[43..45].try_into().unwrap());
         let forward_delay = u16::from_be_bytes(bytes[45..47].try_into().unwrap());
 
-        Ok(BpduFrame {
+        Ok(Self {
             destination_address,
             source_address,
             protocol_id,
