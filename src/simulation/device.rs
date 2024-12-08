@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 use raylib::{
     color::Color,
@@ -153,12 +153,11 @@ impl Devices {
     pub fn packets_empty(&self) -> bool {
         self.packets.is_empty()
     }
-
     pub fn update(&mut self, tick_devices: bool) {
         let mut lazy_delete = vec![];
-        for (i, e) in self.iter_mut().enumerate() {
+        for e in self.iter_mut() {
             if e.is_deleted() {
-                lazy_delete.push((i, e.id()));
+                lazy_delete.push(e.id());
                 continue;
             }
             if tick_devices {
@@ -170,27 +169,17 @@ impl Devices {
             p.tick();
         }
 
-        let mut removed: HashSet<DeviceId> = HashSet::new();
-        for (i, id) in lazy_delete {
-            let adj_list = self.adj_devices.remove(&id).unwrap();
-
-            // Remove from adj list
-            for (_, adj_id, _) in adj_list {
-                if removed.contains(&adj_id) {
-                    continue;
-                }
-
-                self.adj_devices
-                    .get_mut(&adj_id)
-                    .unwrap()
-                    .retain(|(_, adj_id, _)| *adj_id != id);
-                removed.insert(adj_id);
+        for id in lazy_delete.iter() {
+            // Remove adjacencies
+            for (port, _, _) in self.adj_devices.get(id).unwrap().clone() {
+                self.disconnect(*id, port);
             }
 
-            removed.clear();
+            let i = self.lookup.remove(id).expect("Device already removed");
+            self.adj_devices.remove(id).expect("Device already removed");
 
             // Remove from entity list and sim
-            match id {
+            match *id {
                 DeviceId::Desktop(_) => {
                     self.cable_sim
                         .remove(self.desktops[i].desktop.interface.ethernet.port());

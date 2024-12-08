@@ -285,9 +285,6 @@ impl Router {
     /// * `port` - The port number to disable the interface on.
     pub fn disconnect(&mut self, port: usize) {
         let rp = &mut *self.ports[port].borrow_mut();
-        if !rp.enabled {
-            return;
-        }
 
         self.table.retain(|_, v| v.port != port);
 

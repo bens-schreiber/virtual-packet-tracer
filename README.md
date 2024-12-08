@@ -53,7 +53,7 @@ This project was originally created as a semester project for WSU CPTS 327, and 
 - [ ] Cleanup and reduce GUI code
 
 Theres several bugs I've noticed when testing I'd also like to fix:
-- [ ] Creating multiple unique devices and deleting them can sometimes crash the sim
+- [x] ~~Creating multiple unique devices and deleting them can sometimes crash the sim~~
 - [x] ~~RSTP fails to block redundancies in advanced graphs under elapsed time (unit tests prove the alg works programmically, realtime simulation produces interesting edge cases)~~
 - [ ] ...many small UI bugs
 
