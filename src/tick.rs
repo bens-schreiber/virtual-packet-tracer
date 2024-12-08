@@ -13,14 +13,14 @@ pub struct TimeProvider {
 
 impl TimeProvider {
     /// A singleton instance of TimeProvider.
-    /// Really, I just don't want to pass the instance around everywhere and I'm definitely not going to make a DI container.
+    // Really, I just don't want to pass the instance around everywhere and I'm definitely not going to make a DI container.
     pub fn instance() -> &'static Mutex<Self> {
         static INSTANCE: OnceLock<Mutex<TimeProvider>> = OnceLock::new();
         INSTANCE.get_or_init(|| Mutex::new(TimeProvider::new()))
     }
 
     pub fn new() -> Self {
-        TimeProvider {
+        Self {
             frozen: None,
             offset: Duration::ZERO,
             last_unfrozen: SystemTime::now(),
@@ -45,7 +45,9 @@ impl TimeProvider {
         }
 
         if let Some(frozen_time) = self.frozen {
-            self.offset += frozen_time.duration_since(self.last_unfrozen).unwrap();
+            self.offset += frozen_time
+                .duration_since(self.last_unfrozen)
+                .expect("Time went backwards");
         }
 
         self.frozen = None;
@@ -54,11 +56,14 @@ impl TimeProvider {
 
     /// Advances the current frozen time by the given duration.
     pub fn advance(&mut self, duration: Duration) {
-        if self.frozen.is_none() {
-            panic!("TimeProvider is not frozen");
+        match self.frozen {
+            Some(frozen_time) => {
+                self.frozen = Some(frozen_time + duration);
+            }
+            None => {
+                panic!("TimeProvider is not frozen");
+            }
         }
-
-        self.frozen = Some(self.frozen.unwrap() + duration);
     }
 
     /// Returns the time. Not accurate to SystemTime::now(), considers frozen time and offset.
@@ -120,14 +125,11 @@ impl<T: Eq + Hash + Clone> TickTimer<T> {
             tp.now()
         };
 
-        let mut ready = vec![];
-        for (key, (time_ready, _, _)) in self.map.iter() {
-            if *time_ready <= now {
-                ready.push(key.clone());
-            }
-        }
-
-        ready
+        self.map
+            .iter()
+            .filter(|(_, (time_ready, _, _))| *time_ready <= now)
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 }
 
@@ -142,10 +144,7 @@ impl<T: Eq + Hash + Clone> Tickable for TickTimer<T> {
             .retain(|_, (time_ready, _, persist)| *time_ready > now || *persist);
 
         for (_, (time_ready, interval_in_seconds, persist)) in self.map.iter_mut() {
-            if *time_ready > now {
-                continue;
-            }
-            if !*persist {
+            if *time_ready > now || !*persist {
                 continue;
             }
             *time_ready = now + *interval_in_seconds;

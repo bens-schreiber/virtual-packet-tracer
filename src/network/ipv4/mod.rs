@@ -1,4 +1,4 @@
-use crate::network::{ethernet::ByteSerialize, ethernet::MacAddress};
+use crate::network::{ethernet::ByteSerializable, ethernet::MacAddress};
 
 pub mod interface;
 
@@ -35,9 +35,9 @@ pub enum Ipv4Protocol {
 impl From<u8> for Ipv4Protocol {
     fn from(item: u8) -> Self {
         match item {
-            1 => Ipv4Protocol::Icmp,
-            17 => Ipv4Protocol::Rip,
-            255 => Ipv4Protocol::Test,
+            1 => Self::Icmp,
+            17 => Self::Rip,
+            255 => Self::Test,
             _ => panic!("Invalid Ipv4 protocol"),
         }
     }
@@ -68,7 +68,7 @@ impl Ipv4Frame {
         data: Vec<u8>,
         protocol: Ipv4Protocol,
     ) -> Self {
-        Ipv4Frame {
+        Self {
             version_hlen: 0x45, // Ipv4, 5 words
             tos: 0,
             total_length: 20 + data.len() as u16,
@@ -85,29 +85,12 @@ impl Ipv4Frame {
     }
 
     pub fn test(source: Ipv4Address, destination: Ipv4Address, ttl: u8, data: u8) -> Self {
-        Ipv4Frame::new(source, destination, ttl, vec![data], Ipv4Protocol::Test)
+        Self::new(source, destination, ttl, vec![data], Ipv4Protocol::Test)
     }
 }
 
-impl ByteSerialize for Ipv4Frame {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.version_hlen);
-        bytes.push(self.tos);
-        bytes.extend_from_slice(&self.total_length.to_be_bytes());
-        bytes.extend_from_slice(&self.id.to_be_bytes());
-        bytes.extend_from_slice(&self.flags_fragment_offset.to_be_bytes());
-        bytes.push(self.ttl);
-        bytes.push(self.protocol);
-        bytes.extend_from_slice(&self.checksum.to_be_bytes());
-        bytes.extend_from_slice(&self.source);
-        bytes.extend_from_slice(&self.destination);
-        bytes.extend_from_slice(&self.option);
-        bytes.extend_from_slice(&self.data);
-        bytes
-    }
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<Ipv4Frame, std::io::Error> {
+impl ByteSerializable for Ipv4Frame {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
         if bytes.len() < 20 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -135,7 +118,7 @@ impl ByteSerialize for Ipv4Frame {
         let option = bytes[20..(version_hlen & 0x0F) as usize * 4].to_vec();
         let data = bytes[(version_hlen & 0x0F) as usize * 4..].to_vec();
 
-        Ok(Ipv4Frame {
+        Ok(Self {
             version_hlen,
             tos,
             total_length,
@@ -150,10 +133,26 @@ impl ByteSerialize for Ipv4Frame {
             data,
         })
     }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.version_hlen);
+        bytes.push(self.tos);
+        bytes.extend_from_slice(&self.total_length.to_be_bytes());
+        bytes.extend_from_slice(&self.id.to_be_bytes());
+        bytes.extend_from_slice(&self.flags_fragment_offset.to_be_bytes());
+        bytes.push(self.ttl);
+        bytes.push(self.protocol);
+        bytes.extend_from_slice(&self.checksum.to_be_bytes());
+        bytes.extend_from_slice(&self.source);
+        bytes.extend_from_slice(&self.destination);
+        bytes.extend_from_slice(&self.option);
+        bytes.extend_from_slice(&self.data);
+        bytes
+    }
 }
 
 /// Address Resolution Protocol (ARP) operation code
-#[repr(u16)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum ArpOperation {
     Request = 1,
@@ -163,8 +162,8 @@ pub enum ArpOperation {
 impl From<u16> for ArpOperation {
     fn from(item: u16) -> Self {
         match item {
-            1 => ArpOperation::Request,
-            2 => ArpOperation::Reply,
+            1 => Self::Request,
+            2 => Self::Reply,
             _ => panic!("Invalid ARP operation"),
         }
     }
@@ -190,8 +189,8 @@ impl ArpFrame {
         sender_ip: Ipv4Address,
         target_mac: MacAddress,
         target_ip: Ipv4Address,
-    ) -> ArpFrame {
-        ArpFrame {
+    ) -> Self {
+        Self {
             hardware_type: 1,      // Ethernet
             protocol_type: 0x0800, // Ipv4
             hardware_size: 6,
@@ -205,22 +204,8 @@ impl ArpFrame {
     }
 }
 
-impl ByteSerialize for ArpFrame {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(self.hardware_type as u16).to_be_bytes());
-        bytes.extend_from_slice(&(self.protocol_type as u16).to_be_bytes());
-        bytes.push(self.hardware_size);
-        bytes.push(self.protocol_size);
-        bytes.extend_from_slice(&(self.opcode as u16).to_be_bytes());
-        bytes.extend_from_slice(&self.sender_mac);
-        bytes.extend_from_slice(&self.sender_ip);
-        bytes.extend_from_slice(&self.target_mac);
-        bytes.extend_from_slice(&self.target_ip);
-        bytes
-    }
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<ArpFrame, std::io::Error> {
+impl ByteSerializable for ArpFrame {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
         if bytes.len() != 28 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -238,7 +223,7 @@ impl ByteSerialize for ArpFrame {
         let target_mac = bytes[18..24].try_into().unwrap();
         let target_ip = bytes[24..28].try_into().unwrap();
 
-        Ok(ArpFrame {
+        Ok(Self {
             hardware_type,
             protocol_type,
             hardware_size,
@@ -249,6 +234,20 @@ impl ByteSerialize for ArpFrame {
             target_mac,
             target_ip,
         })
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(self.hardware_type as u16).to_be_bytes());
+        bytes.extend_from_slice(&(self.protocol_type as u16).to_be_bytes());
+        bytes.push(self.hardware_size);
+        bytes.push(self.protocol_size);
+        bytes.extend_from_slice(&(self.opcode as u16).to_be_bytes());
+        bytes.extend_from_slice(&self.sender_mac);
+        bytes.extend_from_slice(&self.sender_ip);
+        bytes.extend_from_slice(&self.target_mac);
+        bytes.extend_from_slice(&self.target_ip);
+        bytes
     }
 }
 
@@ -276,8 +275,8 @@ impl IcmpFrame {
         identifier: u16,
         sequence_number: u16,
         data: Vec<u8>,
-    ) -> IcmpFrame {
-        IcmpFrame {
+    ) -> Self {
+        Self {
             icmp_type,
             code: icmp_code,
             checksum: 0, // TODO: Calculate checksum
@@ -287,32 +286,21 @@ impl IcmpFrame {
         }
     }
 
-    pub fn echo_request(identifier: u16, sequence_number: u16, data: Vec<u8>) -> IcmpFrame {
-        IcmpFrame::new(8, 0, identifier, sequence_number, data)
+    pub fn echo_request(identifier: u16, sequence_number: u16, data: Vec<u8>) -> Self {
+        Self::new(8, 0, identifier, sequence_number, data)
     }
 
-    pub fn echo_reply(identifier: u16, sequence_number: u16, data: Vec<u8>) -> IcmpFrame {
-        IcmpFrame::new(0, 0, identifier, sequence_number, data)
+    pub fn echo_reply(identifier: u16, sequence_number: u16, data: Vec<u8>) -> Self {
+        Self::new(0, 0, identifier, sequence_number, data)
     }
 
-    pub fn destination_unreachable(code: u8, data: Vec<u8>) -> IcmpFrame {
-        IcmpFrame::new(3, code, 0, 0, data)
+    pub fn destination_unreachable(code: u8, data: Vec<u8>) -> Self {
+        Self::new(3, code, 0, 0, data)
     }
 }
 
-impl ByteSerialize for IcmpFrame {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.icmp_type);
-        bytes.push(self.code);
-        bytes.extend_from_slice(&self.checksum.to_be_bytes());
-        bytes.extend_from_slice(&self.identifier.to_be_bytes());
-        bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
-        bytes.extend_from_slice(&self.data);
-        bytes
-    }
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<IcmpFrame, std::io::Error> {
+impl ByteSerializable for IcmpFrame {
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
         if bytes.len() < 8 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -334,7 +322,7 @@ impl ByteSerialize for IcmpFrame {
         let sequence_number = u16::from_be_bytes([bytes[6], bytes[7]]);
         let data = bytes[8..].to_vec();
 
-        Ok(IcmpFrame {
+        Ok(Self {
             icmp_type,
             code,
             checksum,
@@ -342,5 +330,16 @@ impl ByteSerialize for IcmpFrame {
             sequence_number,
             data,
         })
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.push(self.icmp_type);
+        bytes.push(self.code);
+        bytes.extend_from_slice(&self.checksum.to_be_bytes());
+        bytes.extend_from_slice(&self.identifier.to_be_bytes());
+        bytes.extend_from_slice(&self.sequence_number.to_be_bytes());
+        bytes.extend_from_slice(&self.data);
+        bytes
     }
 }

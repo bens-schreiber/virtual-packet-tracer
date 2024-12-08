@@ -184,30 +184,35 @@ impl Ipv4Interface {
 
         let frame = Ipv4Frame::new(source, destination, ttl, data, protocol);
 
-        if arp_key.is_none() {
-            if self.router_interface {
-                // No default gateway, but we are a router interface, so we can send to ourselves
-                // for the router to check the routing table.
-                self.ethernet
-                    .send(self.ethernet.mac_address, EtherType::Ipv4, frame.to_bytes());
-                return Ok(true);
+        match arp_key {
+            Some(arp_key) => {
+                if let Some(mac_address) = self.arp_table.get(&arp_key) {
+                    self.ethernet
+                        .send(*mac_address, EtherType::Ipv4, frame.to_bytes());
+                    return Ok(true);
+                }
+
+                // Send an ARP request to find the MAC address of the target IP address
+                // Buffer the frame to send after the ARP request is resolved
+                self.arp_buf.push(WaitForArpResolve::new(arp_key, frame));
+                self.ethernet.arp_request(self.ip_address, arp_key);
+
+                Ok(false)
             }
-            return Err("Destination is unreachable. No default gateway.");
+            None => {
+                if self.router_interface {
+                    // No default gateway, but we are a router interface, so we can send to ourselves
+                    // for the router to check the routing table.
+                    self.ethernet.send(
+                        self.ethernet.mac_address,
+                        EtherType::Ipv4,
+                        frame.to_bytes(),
+                    );
+                    return Ok(true);
+                }
+                Err("Destination is unreachable. No default gateway.")
+            }
         }
-
-        if let Some(mac_address) = self.arp_table.get(&arp_key.unwrap()) {
-            self.ethernet
-                .send(*mac_address, EtherType::Ipv4, frame.to_bytes());
-            return Ok(true);
-        }
-
-        // Send an ARP request to find the MAC address of the target IP address
-        // Buffer the frame to send after the ARP request is resolved
-        self.arp_buf
-            .push(WaitForArpResolve::new(arp_key.unwrap(), frame));
-        self.ethernet.arp_request(self.ip_address, arp_key.unwrap());
-
-        Ok(false)
     }
 
     /// Attempts to send data to the destination IP address as an Ipv4Frame.
@@ -239,7 +244,7 @@ impl Ipv4Interface {
     #[cfg(test)]
     pub fn send_t(&mut self, destination: Ipv4Address, data: u8) {
         self.send(destination, vec![data], Ipv4Protocol::Test)
-            .unwrap();
+            .expect("Failed to send");
     }
 
     /// Sends an ICMP frame to the destination IP address.
@@ -250,17 +255,16 @@ impl Ipv4Interface {
         destination: Ipv4Address,
         kind: IcmpType,
     ) -> Result<bool, &'static str> {
-        let mut k = kind;
-        if self._ip_is_self(destination) {
-            k = IcmpType::EchoReply; // Ping self? Reply.
-        }
-
-        let icmp_frame = match k {
+        let icmp_type = if self._ip_is_self(destination) {
+            IcmpType::EchoReply
+        } else {
+            kind
+        };
+        let icmp_frame = match icmp_type {
             IcmpType::EchoRequest => IcmpFrame::echo_request(0, 0, vec![]),
             IcmpType::EchoReply => IcmpFrame::echo_reply(0, 0, vec![]),
             IcmpType::Unreachable => IcmpFrame::destination_unreachable(0, vec![]),
         };
-
         self.sendv(
             self.ip_address,
             destination,
@@ -302,17 +306,18 @@ impl Ipv4Interface {
                 _ => continue, // Discard non-Ethernet2 frames
             };
 
-            if f.ether_type == EtherType::Ipv4 {
-                if let Ok(ipv4_frame) = Ipv4Frame::from_bytes(f.data) {
-                    self._receive_ipv4(ipv4_frame, f.source_address, &mut ipv4_frames);
+            match f.ether_type {
+                EtherType::Ipv4 => {
+                    if let Ok(ipv4_frame) = Ipv4Frame::from_bytes(f.data) {
+                        self._receive_ipv4(ipv4_frame, f.source_address, &mut ipv4_frames);
+                    }
                 }
-                continue;
-            }
-
-            if f.ether_type == EtherType::Arp {
-                if let Ok(arp_frame) = ArpFrame::from_bytes(f.data) {
-                    self._receive_arp(arp_frame);
+                EtherType::Arp => {
+                    if let Ok(arp_frame) = ArpFrame::from_bytes(f.data) {
+                        self._receive_arp(arp_frame);
+                    }
                 }
+                _ => {}
             }
         }
 
@@ -351,11 +356,9 @@ impl Ipv4Interface {
             && frame.source != self.ip_address
             && frame.protocol == 1
         {
-            if let Ok(icmp_frame) = IcmpFrame::from_bytes(frame.data.clone()) {
-                if icmp_frame.icmp_type == 8 {
-                    let _ = self.send_icmp(frame.source, IcmpType::EchoReply);
-                    return;
-                }
+            if let Ok(IcmpFrame { icmp_type: 8, .. }) = IcmpFrame::from_bytes(frame.data.clone()) {
+                let _ = self.send_icmp(frame.source, IcmpType::EchoReply);
+                return;
             }
         }
         ipv4_frames.push(frame);
@@ -370,12 +373,10 @@ impl Ipv4Interface {
             return;
         }
 
-        let destination_mac: Option<MacAddress> = {
-            if frame.target_ip == self.ip_address {
-                Some(frame.sender_mac)
-            } else {
-                self.arp_table.get(&frame.target_ip).copied()
-            }
+        let destination_mac: Option<MacAddress> = if frame.target_ip == self.ip_address {
+            Some(frame.sender_mac)
+        } else {
+            self.arp_table.get(&frame.target_ip).copied()
         };
 
         // Reply if this interface has the value
@@ -408,7 +409,6 @@ impl Ipv4Interface {
                     .send(*mac_address, EtherType::Ipv4, w.frame.to_bytes());
                 w.retry = 0;
                 w.ttl = 0;
-                continue;
             }
         }
 

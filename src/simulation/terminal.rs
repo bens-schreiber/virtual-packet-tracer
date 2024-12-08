@@ -3,7 +3,7 @@ use std::{collections::HashMap, net::Ipv4Addr};
 use crate::{
     network::{
         device::{desktop::Desktop, router::Router, switch::Switch},
-        ethernet::ByteSerialize,
+        ethernet::ByteSerializable,
         ipv4::{IcmpFrame, IcmpType},
     },
     tick::{TickTimer, Tickable},

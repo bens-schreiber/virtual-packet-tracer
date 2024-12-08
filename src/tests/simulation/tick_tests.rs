@@ -16,7 +16,7 @@ use crate::{
 #[test]
 fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut s = Switch::from_seed(1, 1);
     let mut i1 = EthernetInterface::new(mac_addr!(33));
     let mut i2 = EthernetInterface::new(mac_addr!(44));
@@ -63,7 +63,7 @@ fn Tick_SwitchRstpInit_FinishesAfter15Seconds() {
 #[test]
 fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut r = Router::from_seed(1);
     let mut i1 = Ipv4Interface::new(
         mac_addr!(9),

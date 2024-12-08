@@ -58,7 +58,7 @@ impl EthernetFrame {
     }
 }
 
-impl ByteSerialize for EthernetFrame {
+impl ByteSerializable for EthernetFrame {
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
         let ether_type_or_length = u16::from_be_bytes(bytes[20..22].try_into().unwrap());
 
@@ -78,12 +78,14 @@ impl ByteSerialize for EthernetFrame {
 #[macro_export]
 macro_rules! eth2 {
     ($destination_address:expr, $source_address:expr, $data:expr, $ether_type:expr) => {
-        crate::network::ethernet::EthernetFrame::Ethernet2(crate::network::ethernet::Ethernet2Frame::new(
-            $destination_address,
-            $source_address,
-            $data,
-            $ether_type,
-        ))
+        crate::network::ethernet::EthernetFrame::Ethernet2(
+            crate::network::ethernet::Ethernet2Frame::new(
+                $destination_address,
+                $source_address,
+                $data,
+                $ether_type,
+            ),
+        )
     };
 }
 
@@ -106,7 +108,6 @@ macro_rules! eth802_3_data {
 }
 
 /// Ethernet II EtherType field
-#[repr(u16)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum EtherType {
     Ipv4 = 0x0800,
@@ -117,9 +118,9 @@ pub enum EtherType {
 impl From<u16> for EtherType {
     fn from(item: u16) -> Self {
         match item {
-            0x0800 => EtherType::Ipv4,
-            0x0806 => EtherType::Arp,
-            _ => EtherType::Debug,
+            0x0800 => Self::Ipv4,
+            0x0806 => Self::Arp,
+            _ => Self::Debug,
         }
     }
 }
@@ -142,8 +143,8 @@ impl Ethernet2Frame {
         source_address: MacAddress,
         data: Vec<u8>,
         ether_type: EtherType,
-    ) -> Ethernet2Frame {
-        Ethernet2Frame {
+    ) -> Self {
+        Self {
             preamble: [0x55; 7],
             start_frame_delimiter: 0xD5,
             destination_address,
@@ -155,7 +156,7 @@ impl Ethernet2Frame {
     }
 }
 
-impl ByteSerialize for Ethernet2Frame {
+impl ByteSerializable for Ethernet2Frame {
     fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet2Frame, std::io::Error> {
         if bytes.len() < 46 {
             return Err(std::io::Error::new(
@@ -193,7 +194,7 @@ impl ByteSerialize for Ethernet2Frame {
             bytes[bytes.len() - 1],
         ]);
 
-        Ok(Ethernet2Frame {
+        Ok(Self {
             preamble,
             start_frame_delimiter,
             destination_address,
@@ -236,12 +237,8 @@ pub struct Ethernet802_3Frame {
 }
 
 impl Ethernet802_3Frame {
-    pub fn new(
-        destination_address: MacAddress,
-        source_address: MacAddress,
-        data: Vec<u8>,
-    ) -> Ethernet802_3Frame {
-        Ethernet802_3Frame {
+    pub fn new(destination_address: MacAddress, source_address: MacAddress, data: Vec<u8>) -> Self {
+        Self {
             preamble: [0x55; 7],
             start_frame_delimiter: 0xD5,
             destination_address,
@@ -256,7 +253,7 @@ impl Ethernet802_3Frame {
     }
 }
 
-impl ByteSerialize for Ethernet802_3Frame {
+impl ByteSerializable for Ethernet802_3Frame {
     fn from_bytes(bytes: Vec<u8>) -> Result<Ethernet802_3Frame, std::io::Error> {
         if bytes.len() < 64 {
             return Err(std::io::Error::new(
@@ -298,7 +295,7 @@ impl ByteSerialize for Ethernet802_3Frame {
             bytes[bytes.len() - 1],
         ]);
 
-        Ok(Ethernet802_3Frame {
+        Ok(Self {
             preamble,
             start_frame_delimiter,
             destination_address,
@@ -328,14 +325,14 @@ impl ByteSerialize for Ethernet802_3Frame {
     }
 }
 
-pub trait ByteSerialize {
-    // Convert the struct to a byte array
-    fn to_bytes(&self) -> Vec<u8> {
-        Vec::new()
-    }
-
+pub trait ByteSerializable {
     // Convert a byte array to a struct
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error>
     where
         Self: Sized;
+
+    // Convert the struct to a byte array
+    fn to_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
 }

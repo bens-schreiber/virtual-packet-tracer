@@ -18,9 +18,9 @@ pub struct EthernetInterface {
 }
 
 impl EthernetInterface {
-    pub fn new(mac_address: MacAddress) -> EthernetInterface {
-        EthernetInterface {
-            port: Rc::new(RefCell::new(EthernetPort::new())),
+    pub fn new(mac_address: MacAddress) -> Self {
+        Self {
+            port: Rc::new(RefCell::new(EthernetPort::default())),
             mac_address,
         }
     }
@@ -129,14 +129,13 @@ impl EthernetInterface {
             return vec![];
         }
 
-        let frames = bytes
+        bytes
             .into_iter()
-            .map(|b| EthernetFrame::from_bytes(b))
-            .filter(|f| f.is_ok())
-            .map(|f| f.unwrap())
-            .collect();
-
-        frames
+            .filter_map(|b| match EthernetFrame::from_bytes(b) {
+                Ok(frame) => Some(frame),
+                Err(_) => None,
+            })
+            .collect()
     }
 
     /// Returns a list of EthernetII frames that were received since the last call.
@@ -146,9 +145,8 @@ impl EthernetInterface {
         let mut eth2_frames = Vec::new();
 
         for frame in frames {
-            match frame {
-                EthernetFrame::Ethernet2(eth2_frame) => eth2_frames.push(eth2_frame),
-                _ => continue,
+            if let EthernetFrame::Ethernet2(eth2_frame) = frame {
+                eth2_frames.push(eth2_frame);
             }
         }
 

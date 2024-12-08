@@ -117,7 +117,7 @@ impl Devices {
             adj_devices: HashMap::new(),
             lookup: HashMap::new(),
             seed: 1,
-            cable_sim: CableSimulator::new(),
+            cable_sim: CableSimulator::default(),
         }
     }
 
@@ -353,10 +353,18 @@ impl Devices {
                         .connect(port, &mut ds.desktops[other_i].desktop.interface.ethernet);
                 }
                 DeviceId::Switch(_) => {
-                    EthernetPort::connect(
-                        &mut e.switch.ports()[port],
-                        &mut ds.switches[other_i].switch.ports()[other_port],
-                    );
+                    // have to call connect on the switch device so the switch hello bpdu is sent.
+                    // compiler gymnastics ensue...
+                    let (e, other_switch) = if e_i < other_i {
+                        let (left, right) = ds.switches.split_at_mut(other_i);
+                        (&mut left[e_i], &mut right[0])
+                    } else {
+                        let (left, right) = ds.switches.split_at_mut(e_i);
+                        (&mut right[0], &mut left[other_i])
+                    };
+
+                    e.switch
+                        .connect_switch(port, &mut other_switch.switch, other_port);
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(

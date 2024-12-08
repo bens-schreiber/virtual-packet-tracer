@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     is_ipv4_multicast_or_broadcast, mac_addr,
     network::{
-        ethernet::{ByteSerialize, MacAddress},
+        ethernet::{ByteSerializable, MacAddress},
         ipv4::{interface::Ipv4Interface, IcmpType, Ipv4Address, Ipv4Protocol},
     },
     network_address,
@@ -381,7 +381,7 @@ impl RipFrame {
     }
 }
 
-impl ByteSerialize for RipRoute {
+impl ByteSerializable for RipRoute {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.address_family.to_be_bytes());
@@ -419,7 +419,7 @@ impl ByteSerialize for RipRoute {
     }
 }
 
-impl ByteSerialize for RipFrame {
+impl ByteSerializable for RipFrame {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.push(self.command);

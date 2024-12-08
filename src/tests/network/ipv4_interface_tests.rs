@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 
 use crate::network::device::cable::CableSimulator;
-use crate::network::ethernet::ByteSerialize;
+use crate::network::ethernet::ByteSerializable;
 use crate::network::ethernet::{interface::*, EtherType};
 use crate::network::ipv4::interface::*;
 use crate::{arp_table, network::ipv4::*};
 use crate::{eth2, eth2_data, mac_addr, mac_broadcast_addr};
 
 fn same_subnet_filled_arp_tables() -> (CableSimulator, Ipv4Interface, Ipv4Interface) {
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
 
     let i1_ip = [192, 168, 1, 1];
     let i1_mac_addr = mac_addr!(1);
@@ -62,7 +62,7 @@ fn Ipv4_EncapsulateIcmpFrame_GetOriginalFrameAfterSerialization() {
 #[test]
 fn Send_UnknownIpV4_ReceiveArpRequest() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
@@ -102,7 +102,7 @@ fn Send_UnknownIpV4_ReceiveArpRequest() {
 #[test]
 fn Send_UnknownIpV4_ReceiveArpReply() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
@@ -142,7 +142,7 @@ fn Send_UnknownIpV4_ReceiveArpReply() {
 #[test]
 fn Send_UnknownIpV4AfterMultipleRetries_ReceiveMultipleArpRequests() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
@@ -187,7 +187,7 @@ fn Send_SameSubnet_ReceivesIpv4Frame() {
 #[test]
 fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
@@ -222,7 +222,7 @@ fn Send_UnknownIpv4AfterMultipleRetries_ReturnsOriginalRequest() {
 #[test]
 fn Send_DifferentSubnet_SendsToDefaultGateway() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
 
     let mut default_gateway =
         Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 254], [255, 255, 255, 0], None);
@@ -251,7 +251,7 @@ fn Send_DifferentSubnet_SendsToDefaultGateway() {
 #[test]
 fn Send_FillsArpTableOnReceive_SendsWithoutArp() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::from_arp_table(
         mac_addr!(1),
         [192, 168, 1, 1],
@@ -288,7 +288,7 @@ fn Send_FillsArpTableOnReceive_SendsWithoutArp() {
 #[test]
 fn Send_DifferentSubnetsWithoutDefaultGateway_DropsFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::from_arp_table(
         mac_addr!(1),
         [192, 168, 1, 1],
@@ -335,7 +335,7 @@ fn Arp_TwoInterfaces_BothInterfacesFillArpTable() {
 #[test]
 fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
     let mut i2 = Ipv4Interface::new(mac_addr!(2), [192, 168, 1, 2], [255, 255, 255, 0], None);
 
@@ -375,7 +375,7 @@ fn Ping_TwoInterfaces_BothInterfacesReceiveIcmp() {
 #[test]
 fn Ping_Self_ReceiveIcmpEchoReply() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(mac_addr!(1), [192, 168, 1, 1], [255, 255, 255, 0], None);
 
     sim.add(i1.ethernet.port());

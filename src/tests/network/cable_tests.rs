@@ -7,7 +7,7 @@ use crate::{eth2_data, mac_addr};
 #[test]
 fn CableSimulator_Tick_ConsumesAllOutgoing() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = EthernetInterface::new(mac_addr!(1));
     let mut i2 = EthernetInterface::new(mac_addr!(2));
     let mut uc_interface = EthernetInterface::new(mac_addr!(3));

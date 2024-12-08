@@ -4,23 +4,18 @@ use std::{cell::RefCell, rc::Rc};
 /// Simulates the movement of data.
 ///
 /// Holds a collection of EthernetPorts and moves data between on each `tick`.
+#[derive(Default)]
 pub struct CableSimulator {
     ports: Vec<Rc<RefCell<EthernetPort>>>,
 }
 
 impl CableSimulator {
-    pub fn new() -> CableSimulator {
-        CableSimulator { ports: Vec::new() }
-    }
-
     /// Adds a port to the simulator.
-    /// * `ethernet_port` - The port to add to the simulator.
     pub fn add(&mut self, ethernet_port: Rc<RefCell<EthernetPort>>) {
-        self.ports.push(ethernet_port);
+        self.ports.push(ethernet_port.clone());
     }
 
     /// Adds multiple ports to the simulator.
-    /// * `ethernet_ports` - The ports to add to the simulator.
     pub fn adds(&mut self, ethernet_ports: Vec<Rc<RefCell<EthernetPort>>>) {
         for e in ethernet_ports {
             self.add(e);
@@ -28,13 +23,11 @@ impl CableSimulator {
     }
 
     /// Removes a port from the simulator.
-    /// * `ethernet_port` - The port to remove from the simulator.
     pub fn remove(&mut self, ethernet_port: Rc<RefCell<EthernetPort>>) {
         self.ports.retain(|port| Rc::ptr_eq(port, &ethernet_port));
     }
 
     /// Removes multiple ports from the simulator.
-    /// * `ethernet_ports` - The ports to remove from the simulator.
     pub fn removes(&mut self, ethernet_ports: Vec<Rc<RefCell<EthernetPort>>>) {
         self.ports.retain(|port| {
             !ethernet_ports
@@ -43,21 +36,16 @@ impl CableSimulator {
         });
     }
 
-    /// Simulates the movement of data over the physical connection.
-    ///
-    /// This means all ports will consume their outgoing buffer and move it to the other port's incoming buffer.
+    /// All ports consume their outgoing buffer and move it to the other port's incoming buffer.
     pub fn transmit(&mut self) {
         for port in self.ports.iter() {
             let mut port = port.borrow_mut();
 
-            // Connection, move the outgoing buffer to the other port's incoming buffer
-            if let Some(connection) = port.connection.clone() {
+            if let Some(ref mut connection) = port.connection.clone() {
                 port.consume_outgoing(&mut connection.borrow_mut());
-                continue;
+            } else {
+                port.consume_outgoing(&mut EthernetPort::default());
             }
-
-            // No connection, clear outgoing
-            port.consume_outgoing(&mut EthernetPort::new());
         }
     }
 }
@@ -72,7 +60,7 @@ impl Tickable for CableSimulator {
 ///
 /// This simulated port uses the idea of an Interpacket Gap (IPG) to prepare between frames for transmission
 /// (represented by the Vec<Vec<u8>>, each Vec<u8> is a frame, able to be individually received because of the IPG).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EthernetPort {
     /// Incoming bytes from the physical connection
     incoming_buffer: Vec<Vec<u8>>,
@@ -87,14 +75,6 @@ pub struct EthernetPort {
 }
 
 impl EthernetPort {
-    pub fn new() -> EthernetPort {
-        EthernetPort {
-            incoming_buffer: Vec::new(),
-            outgoing_buffer: Vec::new(),
-            connection: None,
-        }
-    }
-
     /// Connects two ethernet ports together. This is a bi-directional connection.
     /// * `port1` - The first port to connect.
     /// * `port2` - The second port to connect.
@@ -121,19 +101,16 @@ impl EthernetPort {
     }
 
     /// Appends the data to the outgoing buffer.
-    /// * `data` - The data to append to the outgoing buffer.
     pub fn send(&mut self, data: Vec<u8>) {
         self.outgoing_buffer.push(data);
     }
 
     /// Appends the data the incoming buffer.
-    /// * `data` - The data to append to the outgoing buffer and incoming buffer.
     pub fn send_to_self(&mut self, data: Vec<u8>) {
         self.incoming_buffer.push(data);
     }
 
     /// Clears the outgoing buffer and appends it to the other's incoming buffer.
-    /// * `consumable` - The port to consume the outgoing buffer.
     fn consume_outgoing(&mut self, consumable: &mut EthernetPort) {
         consumable.incoming_buffer.append(&mut self.outgoing_buffer);
     }

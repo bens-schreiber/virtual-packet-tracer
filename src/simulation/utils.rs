@@ -6,7 +6,7 @@ use raylib::{
 };
 
 use crate::network::{
-    ethernet::{ByteSerialize, EtherType, Ethernet2Frame, Ethernet802_3Frame, MacAddress},
+    ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, MacAddress},
     ipv4::Ipv4Frame,
 };
 

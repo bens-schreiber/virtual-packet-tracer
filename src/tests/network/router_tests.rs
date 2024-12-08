@@ -4,7 +4,7 @@ use crate::{
     mac_addr,
     network::{
         device::{cable::CableSimulator, router::Router},
-        ethernet::ByteSerialize,
+        ethernet::ByteSerializable,
         ipv4::{interface::Ipv4Interface, IcmpFrame, IcmpType, Ipv4Frame, Ipv4Protocol},
     },
 };
@@ -12,7 +12,7 @@ use crate::{
 #[test]
 fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -59,7 +59,7 @@ fn Route_DoesNotExist_ReceiveDestinationUnreachable() {
 #[test]
 fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(10),
         [192, 168, 1, 1],
@@ -96,7 +96,7 @@ fn Route_ConnectedInterfaceCanResolveDefaultGateway_ReceiveFrame() {
 #[test]
 fn Route_SendAcrossSubnetworks_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -152,7 +152,7 @@ fn Route_SendAcrossSubnetworks_ReceiveFrame() {
 #[test]
 fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -215,7 +215,7 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
 #[test]
 fn Route_PingDefaultGateway_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -263,7 +263,7 @@ fn Route_PingDefaultGateway_ReceiveFrame() {
 #[test]
 fn Route_PingUnreachable_ReturnUnreachable() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -311,7 +311,7 @@ fn Route_PingUnreachable_ReturnUnreachable() {
 #[test]
 fn Route_PingOtherRouterInterface_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
@@ -363,7 +363,7 @@ fn Route_PingOtherRouterInterface_ReceiveFrame() {
 #[test]
 fn Route_PingAcrossRouter_ReceiveFrame() {
     // Arrange
-    let mut sim = CableSimulator::new();
+    let mut sim = CableSimulator::default();
     let mut i1 = Ipv4Interface::new(
         mac_addr!(1),
         [192, 168, 1, 2],
