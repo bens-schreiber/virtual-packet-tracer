@@ -23,7 +23,7 @@ use crate::{
 };
 
 use super::{
-    terminal::{DesktopTerminal, RouterTerminal, SwitchTerminal},
+    terminal::{desktop::DesktopTerminal, router::RouterTerminal, switch::SwitchTerminal},
     utils, GuiMode, GuiState,
 };
 
@@ -85,6 +85,7 @@ pub trait Device: Entity + Storable {
 }
 
 /// Stores all entities in the simulation. Search for devices by their DeviceId.
+#[derive(Default)]
 pub struct Devices {
     lookup: HashMap<DeviceId, usize>,
     seed: u32, // EntityId generator
@@ -105,22 +106,6 @@ pub struct Devices {
 }
 
 impl Devices {
-    pub fn new() -> Self {
-        Self {
-            desktops: Vec::new(),
-            switches: Vec::new(),
-            routers: Vec::new(),
-            packets: Vec::new(),
-            desktop_count: 0,
-            switch_count: 0,
-            router_count: 0,
-            adj_devices: HashMap::new(),
-            lookup: HashMap::new(),
-            seed: 1,
-            cable_sim: CableSimulator::default(),
-        }
-    }
-
     /// Adds a device to the simulation
     pub fn add<T: Device>(&mut self, pos: Vector2) {
         T::store(self, pos)
@@ -161,9 +146,8 @@ impl Devices {
     }
 
     fn next_id_seed(&mut self) -> u32 {
-        let id = self.seed;
         self.seed += 1;
-        id
+        self.seed
     }
 
     pub fn packets_empty(&self) -> bool {
@@ -947,7 +931,7 @@ impl Storable for DesktopDevice {
             pos,
             label: format!("Desktop {}", ds.desktop_count),
             dropdown_gui: None,
-            terminal: DesktopTerminal::new(),
+            terminal: DesktopTerminal::default(),
             edit_gui: DesktopEditGuiState::new([192, 168, 1, 1], [255, 255, 255, 0]),
             deleted: false,
         });
@@ -1376,7 +1360,7 @@ impl Storable for SwitchDevice {
             label: format!("Switch {}", ds.switch_count),
             deleted: false,
             dropdown_gui: None,
-            terminal: SwitchTerminal::new(),
+            terminal: SwitchTerminal::default(),
             edit_gui: SwitchEditGuiState {
                 open: false,
                 pos: Vector2::zero(),
@@ -1811,7 +1795,7 @@ impl Storable for RouterDevice {
                 cmd_line_buffer: [0u8; 0xFF],
                 cmd_line_out: VecDeque::new(),
             },
-            terminal: RouterTerminal::new(),
+            terminal: RouterTerminal::default(),
         });
 
         ds.cable_sim.adds(ds.routers.last().unwrap().router.ports());

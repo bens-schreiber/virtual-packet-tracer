@@ -22,8 +22,8 @@ struct Route {
 }
 
 impl Route {
-    fn new(ip_address: Ipv4Address, subnet_mask: Ipv4Address, port: usize) -> Route {
-        Route {
+    fn new(ip_address: Ipv4Address, subnet_mask: Ipv4Address, port: usize) -> Self {
+        Self {
             ip_address,
             subnet_mask,
             metric: 0,
@@ -63,7 +63,7 @@ impl Router {
     /// let router = Router::from_seed(1);
     /// ```
     /// This will create ports of addresses `mac_addr!(1)` through `mac_addr!(7)`.
-    pub fn from_seed(mac_seed: u64) -> Router {
+    pub fn from_seed(mac_seed: u64) -> Self {
         let ports: [RefCell<RouterPort>; 8] = (0..8)
             .map(|i| {
                 RefCell::new(RouterPort {
@@ -80,12 +80,12 @@ impl Router {
             .try_into()
             .unwrap();
 
-        Router {
+        Self {
             ports,
             table: HashMap::new(),
             mac_address: mac_addr!(mac_seed),
             rip_enabled: false,
-            timer: TickTimer::new(),
+            timer: TickTimer::default(),
         }
     }
 
@@ -153,10 +153,10 @@ impl Router {
                     continue;
                 }
 
-                let _ = rp
-                    .interface
+                rp.interface
                     .borrow_mut()
-                    .send_icmp(frame.source, IcmpType::Unreachable);
+                    .send_icmp(frame.source, IcmpType::Unreachable)
+                    .expect("Failed to send ICMP frame.");
             }
         }
     }
@@ -208,10 +208,6 @@ impl Router {
     }
 
     /// Configures an interface with a ip address, subnet and network address.
-    /// * `port` - The port number to enable.
-    ///
-    /// # Panics
-    /// Panics if the port is out of range.
     pub fn enable_interface(
         &mut self,
         port: usize,
@@ -235,10 +231,9 @@ impl Router {
 
     /// Enables RIP on a port on the router.
     /// Sends a RIP frame to the multicast address.
-    /// * `port` - The port number to enable RIP on.
-    pub fn enable_rip(&mut self, port: usize) {
+    pub fn enable_rip(&mut self, port: usize) -> Result<(), &'static str> {
         if !self.ports[port].borrow_mut().enabled {
-            panic!("Port {} is disabled.", port);
+            return Err("Port is not enabled.");
         }
 
         let frame = self._create_rip_frame();
@@ -251,14 +246,11 @@ impl Router {
 
         self.timer
             .schedule(RouterDelayedAction::RipMulticast, 5, true);
+
+        Ok(())
     }
 
     /// Connects an interface to the router with the given port number.
-    /// * `port` - The port number to connect the interface to.
-    /// * `interface` - The interface to connect to the router.
-    ///
-    /// # Panics
-    /// Panics if the port is out of range
     pub fn connect(&mut self, port: usize, interface: &mut Ipv4Interface) {
         let rp = &mut *self.ports[port].borrow_mut();
         rp.interface.borrow_mut().connect(interface);
@@ -266,27 +258,31 @@ impl Router {
 
     #[cfg(test)]
     /// Connects a router to another router on the given ports.
-    pub fn connect_router(&mut self, port: usize, other_router: &mut Router, other_port: usize) {
+    pub fn connect_router(
+        &mut self,
+        port: usize,
+        other_router: &mut Router,
+        other_port: usize,
+    ) -> Result<(), &'static str> {
         let rp = &mut *self.ports[port].borrow_mut();
         if !rp.enabled {
-            panic!("Port {} is disabled.", port);
+            return Err("Port is disabled.");
         }
 
         let other_rp = &mut *other_router.ports[other_port].borrow_mut();
         if !other_rp.enabled {
-            panic!("Port {} is disabled.", other_port);
+            return Err("Other routers port is disabled.");
         }
 
         rp.interface
             .borrow_mut()
             .connect(&mut other_rp.interface.borrow_mut());
+
+        Ok(())
     }
 
     /// Disconnects an interface on the router with the given port number.
     /// * `port` - The port number to disable the interface on.
-    ///
-    /// # Panics
-    /// Panics if the port is out of range
     pub fn disconnect(&mut self, port: usize) {
         let rp = &mut *self.ports[port].borrow_mut();
         if !rp.enabled {
@@ -345,8 +341,8 @@ impl RipRoute {
         subnet_mask: Ipv4Address,
         next_hop: Ipv4Address,
         metric: u32,
-    ) -> RipRoute {
-        RipRoute {
+    ) -> Self {
+        Self {
             address_family: 0x0002,
             route_tag: 0x0000,
             ip_address,
@@ -364,16 +360,16 @@ struct RipFrame {
 }
 
 impl RipFrame {
-    fn new_response() -> RipFrame {
-        RipFrame {
+    fn new_response() -> Self {
+        Self {
             command: 2,
             version: 2,
             routes: Vec::new(),
         }
     }
 
-    fn new_request() -> RipFrame {
-        RipFrame {
+    fn new_request() -> Self {
+        Self {
             command: 1,
             version: 2,
             routes: Vec::new(),

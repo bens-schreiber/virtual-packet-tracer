@@ -88,13 +88,15 @@ pub struct TickTimer<T: Eq + Hash + Clone> {
     map: HashMap<T, (SystemTime, Duration, bool)>, // (time_ready, interval_in_seconds, persist)
 }
 
-impl<T: Eq + Hash + Clone> TickTimer<T> {
-    pub fn new() -> Self {
+impl<T: Eq + Hash + Clone> Default for TickTimer<T> {
+    fn default() -> Self {
         TickTimer {
             map: HashMap::new(),
         }
     }
+}
 
+impl<T: Eq + Hash + Clone> TickTimer<T> {
     /// Adds a key to the timer IFF it doesn't already exist.
     /// * `key` - The key to add to the timer.
     /// * `interval` - The interval in seconds to wait before the key is ready.

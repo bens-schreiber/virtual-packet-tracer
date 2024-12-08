@@ -10,13 +10,13 @@ pub struct Desktop {
 }
 
 impl Desktop {
-    pub fn from_seed(mac_seed: u64) -> Desktop {
+    pub fn from_seed(mac_seed: u64) -> Self {
         let mac_addr = mac_addr!(mac_seed);
         let ip_addr = [192, 168, 1, 1];
         let subnet_mask = [255, 255, 255, 0];
         let default_gateway = None;
 
-        Desktop {
+        Self {
             interface: Ipv4Interface::new(mac_addr, ip_addr, subnet_mask, default_gateway),
             received: vec![],
         }

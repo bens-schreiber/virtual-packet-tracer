@@ -176,9 +176,10 @@ fn Route_SendAcrossRoutersWithRipConfig_ReceiveFrame() {
 
     r1.enable_interface(1, [10, 0, 0, 1], [255, 255, 255, 252]);
     r2.enable_interface(1, [10, 0, 0, 2], [255, 255, 255, 252]);
-    r1.enable_rip(1);
-    r2.enable_rip(1);
-    r1.connect_router(1, &mut r2, 1);
+    r1.enable_rip(1).expect("Failed to enable RIP on r1");
+    r2.enable_rip(1).expect("Failed to enable RIP on r2");
+    r1.connect_router(1, &mut r2, 1)
+        .expect("Failed to connect r1 to r2");
 
     sim.adds(vec![i1.ethernet.port(), i2.ethernet.port()]);
     sim.adds(r1.ports());

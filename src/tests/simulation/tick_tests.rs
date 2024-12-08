@@ -77,7 +77,12 @@ fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
 
     r.connect(0, &mut i1);
     r.enable_interface(0, [192, 168, 1, 1], [255, 255, 255, 0]);
-    r.enable_rip(0);
+    r.enable_rip(0).expect("Failed to enable RIP");
+
+    {
+        let mut tp = TimeProvider::instance().lock().unwrap();
+        tp.freeze();
+    }
 
     {
         let mut tp = TimeProvider::instance().lock().unwrap();

@@ -101,7 +101,7 @@ impl Switch {
             root_bid: crate::bridge_id!(mac_addr!(mac_seed), bridge_priority), // Assume the switch is the root bridge
             root_cost: 0,
             root_port: None,
-            timer: TickTimer::new(),
+            timer: TickTimer::default(),
             missed_hellos: [0; 32],
             received_bpdu: [false; 32],
         }

@@ -332,13 +332,6 @@ fn handle_click(s: &mut GuiState, rl: &mut RaylibHandle, ds: &mut Devices) {
     // ------------------------------------------------------
 }
 
-struct Selbox {
-    rec: Rectangle,
-    text: &'static str,
-    icon: GuiIconName,
-    fixed: bool,
-}
-
 /// The bottom panel GUI controls
 fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
     let border_color = Color::get_color(d.gui_get_style(
@@ -438,6 +431,13 @@ fn draw_gui_controls(d: &mut RaylibDrawHandle, ds: &Devices, s: &mut GuiState) {
 
     // Menu Options
     //----------------------------------------------
+    struct Selbox {
+        rec: Rectangle,
+        text: &'static str,
+        icon: GuiIconName,
+        fixed: bool,
+    }
+
     let selboxes = [
         Selbox {
             rec: ETHERNET_SELBOX,
@@ -677,7 +677,6 @@ fn add_tracer_packets(ds: &mut Devices, s: &mut GuiState) {
         let traffic = e.traffic(ports);
 
         for (port, ingress) in traffic {
-            // Add the packet to the packet stack
             let data = {
                 let (ing, egr) = e.sniff(port);
                 if ingress {
@@ -689,7 +688,7 @@ fn add_tracer_packets(ds: &mut Devices, s: &mut GuiState) {
 
             let adj_pos = || ds.get(port_id_lookup.get(&port).unwrap().clone()).pos();
             for d in data {
-                let kind = utils::determine_packet_kind(&d);
+                let kind = utils::PacketKind::from_bytes(&d);
                 let time = {
                     let tp = TimeProvider::instance().lock().unwrap();
                     tp.now()
@@ -767,7 +766,7 @@ pub fn run() {
 
     rl.set_target_fps(30);
 
-    let mut ds = Devices::new();
+    let mut ds = Devices::default();
     let mut s = GuiState::default();
 
     let mut last_connected_pos = Vector2::zero();

@@ -27,10 +27,12 @@ pub fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, col
     };
 }
 
+/// Creates a Raylib String (C-String) from a Rust string
 pub fn rstr_from_string(s: String) -> std::ffi::CString {
     std::ffi::CString::new(s).expect("CString::new failed")
 }
 
+/// Converts a null terminated array of bytes to a string
 pub fn array_to_string(array: &[u8]) -> String {
     let end = array.iter().position(|&c| c == 0).unwrap_or(array.len());
     let slice = &array[..end];
@@ -53,29 +55,29 @@ impl PacketKind {
             PacketKind::Icmp(frame) => frame.source_address,
         }
     }
-}
 
-// TODO: assumes the packet is something we can handle. Currently, there is no "custom" sending of frames, so
-// there is no need to handle unknown frames. This will need to be updated if some kind of custom frame sending is added.
-pub fn determine_packet_kind(packet: &Vec<u8>) -> PacketKind {
-    // Determine if the frame is EthernetII or Ethernet802_3
-    let ether_type_or_length = u16::from_be_bytes(packet[20..22].try_into().unwrap());
-    let eth_frame = if ether_type_or_length >= 0x0600 {
-        Ethernet2Frame::from_bytes(packet.clone()).unwrap()
-    } else {
-        return PacketKind::Bpdu(Ethernet802_3Frame::from_bytes(packet.clone()).unwrap());
-    };
+    // TODO: assumes the packet is something we can handle. Currently, there is no "custom" sending of frames, so
+    // there is no need to handle unknown frames. This will need to be updated if some kind of custom frame sending is added.
+    pub fn from_bytes(packet: &Vec<u8>) -> PacketKind {
+        // Determine if the frame is EthernetII or Ethernet802_3
+        let ether_type_or_length = u16::from_be_bytes(packet[20..22].try_into().unwrap());
+        let eth_frame = if ether_type_or_length >= 0x0600 {
+            Ethernet2Frame::from_bytes(packet.clone()).unwrap()
+        } else {
+            return PacketKind::Bpdu(Ethernet802_3Frame::from_bytes(packet.clone()).unwrap());
+        };
 
-    match eth_frame.ether_type {
-        EtherType::Arp => PacketKind::Arp(eth_frame),
-        EtherType::Ipv4 => {
-            let ipv4_frame = Ipv4Frame::from_bytes(eth_frame.data.clone()).unwrap();
-            match ipv4_frame.protocol {
-                1 => PacketKind::Icmp(eth_frame),
-                17 => PacketKind::Rip(eth_frame),
-                _ => panic!("Unknown protocol: {}", ipv4_frame.protocol),
+        match eth_frame.ether_type {
+            EtherType::Arp => PacketKind::Arp(eth_frame),
+            EtherType::Ipv4 => {
+                let ipv4_frame = Ipv4Frame::from_bytes(eth_frame.data.clone()).unwrap();
+                match ipv4_frame.protocol {
+                    1 => PacketKind::Icmp(eth_frame),
+                    17 => PacketKind::Rip(eth_frame),
+                    _ => panic!("Unknown protocol: {}", ipv4_frame.protocol),
+                }
             }
+            _ => panic!("Unknown ether type: {:?}", eth_frame.ether_type),
         }
-        _ => panic!("Unknown ether type: {:?}", eth_frame.ether_type),
     }
 }
