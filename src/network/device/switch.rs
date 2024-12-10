@@ -501,7 +501,7 @@ impl Switch {
             rp
         };
 
-        let (new_root_cost, new_root_port_id, mut role_changed) = match new_root_port {
+        let (new_root_cost, new_root_port_id, mut root_changed) = match new_root_port {
             Some((root_cost, _, root_port_id)) => {
                 if self.root_port.is_some_and(|rp| rp != root_port_id)
                     && self.ports[root_port_id].borrow().stp_role != Some(StpRole::Alternate)
@@ -525,6 +525,7 @@ impl Switch {
         self.root_cost = new_root_cost;
         self.ports[new_root_port_id].borrow_mut().stp_role = Some(StpRole::Root);
         self.ports[new_root_port_id].borrow_mut().stp_state = StpState::Forwarding;
+        let mut role_changed = root_changed;
 
         let segment_to_port = {
             let mut segment_to_port: HashMap<u64, usize> = HashMap::new();
@@ -618,7 +619,7 @@ impl Switch {
             }
         }
 
-        (role_changed, false)
+        (role_changed, root_changed)
     }
 }
 
