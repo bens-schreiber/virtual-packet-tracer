@@ -1,10 +1,9 @@
 # Virtual Packet Tracer by Benjamin Schreiber
 
-A Cisco Packet Tracer inspired simulation tool which allows you to create virtual network environments, test communication between devices, trace packets, and inspect input and output.
-Packets are fully serialized to byte level before being transmitted across devices. Currently simulates layers 1 2 and 3 of the OSI model and stays true to their IEEE standards.
+Live WASM compiled demo https://bschr.dev/vpt
 
-This project was created with Rust, with the networking API created from scratch (see `tests`). The front end was created using RayLib and RayGUI, which added some challenges
-in both creating an immediate mode GUI and managing entities/collision detection (all done in linear time w/ respect to the amount of devices for this project, in others I've implemented BVH trees but for a graphical interface it really isn't necessary).
+VPT is a Cisco Packet Tracer inspired simulation tool which allows you to create virtual network environments, test communication between devices, trace packets, and inspect input and output.
+Packets are fully serialized to byte level before being transmitted across devices. Currently simulates layers 1 2 and 3 of the OSI model and stays true to their IEEE standards.
 
 Router example (RIP allows routers to know where outside networks are!)
 
@@ -55,6 +54,7 @@ This project was originally created as a semester project for WSU CPTS 327, and 
 Theres several bugs I've noticed when testing I'd also like to fix:
 - [x] ~~Creating multiple unique devices and deleting them can sometimes crash the sim~~
 - [x] ~~RSTP fails to block redundancies in advanced graphs under elapsed time (unit tests prove the alg works programmically, realtime simulation produces interesting edge cases)~~
+- [ ] Either change the default font or make all fonts a multiple of the default font size (10) to get rid of blur on WASM build
 - [ ] ...many small UI bugs
 
 
