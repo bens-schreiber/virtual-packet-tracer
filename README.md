@@ -9,9 +9,12 @@ Router example (RIP allows routers to know where outside networks are!)
 
 https://github.com/user-attachments/assets/150a37f1-4128-45ca-8f9e-4f3ef637528d
 
-RSTP Example (Notice real time topology changes!):
+RSTP Example (Convergence in 3 ticks, and rapid instant real-time topology changes):
 
-https://github.com/user-attachments/assets/1884d4c1-2c33-481e-8955-481e2ddbc143
+
+https://github.com/user-attachments/assets/bb9b4b99-56c9-447d-82e1-fc326c2c2b89
+
+
 
 
 
