@@ -501,7 +501,7 @@ impl Switch {
             rp
         };
 
-        let (new_root_cost, new_root_port_id, mut root_changed) = match new_root_port {
+        let (new_root_cost, new_root_port_id, root_changed) = match new_root_port {
             Some((root_cost, _, root_port_id)) => {
                 if self.root_port.is_some_and(|rp| rp != root_port_id)
                     && self.ports[root_port_id].borrow().stp_role != Some(StpRole::Alternate)
