@@ -39,11 +39,11 @@ impl Default for Gui {
 
 impl Gui {
     pub fn render(&mut self, d: &mut RaylibDrawHandle) {
-        const FONT_SIZE: i32 = 20;
+        const FONT_SIZE: i32 = 10;
         const PADDING: i32 = 10;
         const ACTIVE_COLOR: Color = Color::RED;
         const DEFAULT_COLOR: Color = Color::WHITE;
-        const MAX_TERMINAL_LINES: usize = 4;
+        const MAX_TERMINAL_LINES: usize = 13;
         let (box_width, box_height) = (55, 55);
         let (screen_width, screen_height) = (d.get_screen_width(), d.get_screen_height());
 
@@ -160,7 +160,7 @@ impl Gui {
 
         // Terminal
         // -----------------------------------
-        let mut terminal_y = (4.0 / 5.0) * screen_height as f32;
+        let mut terminal_y = (3.0 / 4.0) * screen_height as f32;
         d.gui_set_style(
             GuiControl::DEFAULT,
             GuiDefaultProperty::BACKGROUND_COLOR as i32,
@@ -170,7 +170,7 @@ impl Gui {
             Rectangle {
                 x: 0.0,
                 y: terminal_y,
-                width: screen_width as f32,
+                width: (screen_width / 3) as f32,
                 height: screen_height as f32 - terminal_y - PADDING as f32,
             },
             Some(rstr!("Terminal")),
@@ -229,8 +229,9 @@ impl Gui {
             FONT_SIZE,
         );
 
-        let out_y =
-            std::cmp::min(self.terminal_out.len(), 7) as f32 * (FONT_SIZE as f32) + terminal_y;
+        let out_y = std::cmp::min(self.terminal_out.len(), MAX_TERMINAL_LINES) as f32
+            * (FONT_SIZE as f32)
+            + terminal_y;
 
         if !self.terminal_open {
             d.draw_text("Desktop %", PADDING, out_y as i32, FONT_SIZE, Color::WHITE);
@@ -242,7 +243,7 @@ impl Gui {
         if !self.terminal_open
             && d.gui_text_box(
                 Rectangle::new(
-                    (label_size + 2 * PADDING) as f32,
+                    (label_size + PADDING) as f32,
                     out_y,
                     max_text_size as f32,
                     FONT_SIZE as f32,
@@ -267,7 +268,6 @@ impl Gui {
             }
             self.terminal_buffer = [0u8; 0xFF];
         }
-        d.gui_load_style_default();
 
         // Output
         // if let Some(out) = self.terminal.out() {
@@ -285,7 +285,23 @@ impl Gui {
             d.draw_text(line, PADDING, out_y as i32, FONT_SIZE, Color::WHITE);
             out_y += FONT_SIZE as f32;
         }
-        // ---------------------
+        // -----------------------------------
+
+        // Packet Tracer
+        // -----------------------------------
+        let mut table_y = (3.0 / 4.0) * screen_height as f32;
+        d.gui_panel(
+            Rectangle {
+                x: (screen_width / 3 - 1) as f32,
+                y: table_y,
+                width: (2.0 / 3.0) * screen_width as f32,
+                height: screen_height as f32 - table_y - PADDING as f32,
+            },
+            Some(rstr!("Packet Tracer")),
+        );
+        table_y += 3.0 * PADDING as f32;
+
+        d.gui_load_style_default();
     }
 
     pub fn update(&mut self, rl: &RaylibHandle, ds: &mut DeviceRepository) {

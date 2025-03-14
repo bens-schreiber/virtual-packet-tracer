@@ -89,10 +89,10 @@ impl DeviceRepository {
     }
 
     pub fn render(&mut self, d: &mut RaylibDrawHandle) {
-        const FONT_SIZE: i32 = 20;
+        const FONT_SIZE: i32 = 10;
         const PADDING: i32 = 10;
         for router in &mut self.routers {
-            const RADIUS: f32 = 35.0;
+            const RADIUS: f32 = 25.0;
 
             d.draw_circle(
                 router.pos.x as i32,
@@ -112,7 +112,7 @@ impl DeviceRepository {
                 GuiIconName::ICON_SHUFFLE_FILL,
                 (router.pos.x - (RADIUS / 1.5)) as i32,
                 (router.pos.y - (RADIUS / 1.5)) as i32,
-                3,
+                2,
                 Color::WHITE,
             );
 
@@ -126,7 +126,7 @@ impl DeviceRepository {
         }
 
         for switch in &mut self.switches {
-            const LENGTH: i32 = 70;
+            const LENGTH: i32 = 45;
             d.draw_rectangle_lines(
                 switch.pos.x as i32,
                 switch.pos.y as i32,
@@ -139,7 +139,7 @@ impl DeviceRepository {
                 GuiIconName::ICON_CURSOR_SCALE_FILL,
                 switch.pos.x as i32 + (LENGTH / 6),
                 switch.pos.y as i32 + (LENGTH / 6),
-                3,
+                2,
                 Color::WHITE,
             );
 
@@ -157,14 +157,14 @@ impl DeviceRepository {
                 GuiIconName::ICON_MONITOR,
                 desktop.pos.x as i32,
                 desktop.pos.y as i32,
-                5,
+                3,
                 Color::WHITE,
             );
 
             d.draw_text(
                 desktop.label.as_str(),
                 desktop.pos.x as i32,
-                desktop.pos.y as i32 + 8 * PADDING,
+                desktop.pos.y as i32 + 5 * PADDING,
                 FONT_SIZE,
                 Color::WHITE,
             );
