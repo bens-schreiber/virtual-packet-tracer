@@ -23,13 +23,13 @@ const DESKTOP_DISPLAY_SIZE: i32 = SWITCH_DISPLAY_LENGTH; // roughly
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceId {
-    Router(usize),
-    Switch(usize),
-    Desktop(usize),
+    Router(u64),
+    Switch(u64),
+    Desktop(u64),
 }
 
 impl DeviceId {
-    pub fn as_usize(&self) -> usize {
+    fn as_u64(&self) -> u64 {
         match self {
             DeviceId::Router(i) => *i,
             DeviceId::Switch(i) => *i,
@@ -52,6 +52,7 @@ pub enum DeviceGetQuery {
 pub enum DeviceSetQuery {
     Pos(Vector2),
     Connect(DeviceId, usize, usize), // Adj Device, Self Port, Adj Port
+    Delete,
     Disconnect(usize),
     TerminalInput(String),
 }
@@ -62,6 +63,7 @@ pub struct DeviceAttributes {
     pub label: String,
     pub pos: Vector2,
     pub ports_len: usize,
+    deleted: bool,
 }
 
 struct Components<T> {
@@ -85,6 +87,7 @@ impl<T> Components<T> {
                 label,
                 pos,
                 ports_len,
+                deleted: false,
             },
             terminal,
             device,
@@ -126,6 +129,8 @@ impl Components<Switch> {
 }
 
 pub struct DeviceRepository {
+    lookup: HashMap<u64, usize>,
+
     routers: Vec<Components<Router>>,
     switches: Vec<Components<Switch>>,
     desktops: Vec<Components<Desktop>>,
@@ -140,6 +145,7 @@ pub struct DeviceRepository {
 impl Default for DeviceRepository {
     fn default() -> Self {
         Self {
+            lookup: HashMap::new(),
             routers: Vec::new(),
             switches: Vec::new(),
             desktops: Vec::new(),
@@ -152,6 +158,10 @@ impl Default for DeviceRepository {
 }
 
 impl DeviceRepository {
+    fn lookup(&self, id: DeviceId) -> usize {
+        *self.lookup.get(&id.as_u64()).expect("Bad lookup")
+    }
+
     pub fn add(&mut self, kind: DeviceKind, pos: Vector2) {
         self.mac_seed += 1;
         match kind {
@@ -161,7 +171,7 @@ impl DeviceRepository {
                     self.label_seeds.0
                 };
                 let component = Components::new(
-                    DeviceId::Router(self.routers.len()),
+                    DeviceId::Router(self.mac_seed),
                     Terminal::new_router(),
                     format!("Router {}", label),
                     pos,
@@ -169,6 +179,7 @@ impl DeviceRepository {
                     8,
                 );
 
+                self.lookup.insert(self.mac_seed, self.routers.len());
                 self.cable_simulator.adds(component.device.ports());
                 self.mac_seed += component.attributes.ports_len as u64;
                 self.routers.push(component);
@@ -179,7 +190,7 @@ impl DeviceRepository {
                     self.label_seeds.1
                 };
                 let component = Components::new(
-                    DeviceId::Switch(self.switches.len()),
+                    DeviceId::Switch(self.mac_seed),
                     Terminal::new_switch(),
                     format!("Switch {}", label),
                     pos,
@@ -187,6 +198,7 @@ impl DeviceRepository {
                     32,
                 );
 
+                self.lookup.insert(self.mac_seed, self.switches.len());
                 self.cable_simulator.adds(component.device.ports());
                 self.mac_seed += component.attributes.ports_len as u64;
                 self.switches.push(component);
@@ -197,7 +209,7 @@ impl DeviceRepository {
                     self.label_seeds.2
                 };
                 let component = Components::new(
-                    DeviceId::Desktop(self.desktops.len()),
+                    DeviceId::Desktop(self.mac_seed),
                     Terminal::new_desktop(),
                     format!("Desktop {}", label),
                     pos,
@@ -205,6 +217,7 @@ impl DeviceRepository {
                     1,
                 );
 
+                self.lookup.insert(self.mac_seed, self.desktops.len());
                 self.cable_simulator
                     .add(component.device.interface.ethernet.port());
                 self.mac_seed += component.attributes.ports_len as u64;
@@ -249,28 +262,34 @@ impl DeviceRepository {
 
                 None
             }
-            DeviceGetQuery::Id(id) => match id {
-                DeviceId::Router(i) => Some(self.routers[i].attributes.clone()),
-                DeviceId::Switch(i) => Some(self.switches[i].attributes()),
-                DeviceId::Desktop(i) => Some(self.desktops[i].attributes()),
-            },
+            DeviceGetQuery::Id(id) => {
+                let i = self.lookup(id);
+                match id {
+                    DeviceId::Router(_) => Some(self.routers[i].attributes.clone()),
+                    DeviceId::Switch(_) => Some(self.switches[i].attributes()),
+                    DeviceId::Desktop(_) => Some(self.desktops[i].attributes()),
+                }
+            }
         }
     }
 
-    pub fn get_terminal(&mut self, id: DeviceId) -> Vec<String> {
-        match id {
-            DeviceId::Router(i) => self.switches[i].terminal.out_buf.drain(..).collect(),
-            DeviceId::Switch(i) => self.switches[i].terminal.out_buf.drain(..).collect(),
-            DeviceId::Desktop(i) => self.desktops[i].terminal.out_buf.drain(..).collect(),
-        }
+    pub fn get_terminal_out(&mut self, id: DeviceId) -> Vec<String> {
+        let i = self.lookup(id);
+        let out_buf = match id {
+            DeviceId::Router(_) => &mut self.routers[i].terminal.out_buf,
+            DeviceId::Switch(_) => &mut self.switches[i].terminal.out_buf,
+            DeviceId::Desktop(_) => &mut self.desktops[i].terminal.out_buf,
+        };
+        out_buf.drain(..).collect()
     }
 
     pub fn set(&mut self, id: DeviceId, query: DeviceSetQuery) {
+        let i = self.lookup(id);
         match query {
             DeviceSetQuery::Pos(pos) => match id {
-                DeviceId::Router(i) => self.routers[i].attributes.pos = pos,
-                DeviceId::Switch(i) => self.switches[i].attributes.pos = pos,
-                DeviceId::Desktop(i) => self.desktops[i].attributes.pos = pos,
+                DeviceId::Router(_) => self.routers[i].attributes.pos = pos,
+                DeviceId::Switch(_) => self.switches[i].attributes.pos = pos,
+                DeviceId::Desktop(_) => self.desktops[i].attributes.pos = pos,
             },
             DeviceSetQuery::Connect(adj_id, self_port, adj_port) => {
                 self.connect(id, self_port, adj_id, adj_port);
@@ -279,15 +298,14 @@ impl DeviceRepository {
                 self.disconnect(id, port);
             }
             DeviceSetQuery::TerminalInput(input) => match id {
-                DeviceId::Router(i) => {
-                    self.routers[i].input(&input);
-                }
-                DeviceId::Switch(i) => {
-                    self.switches[i].input(&input);
-                }
-                DeviceId::Desktop(i) => {
-                    self.desktops[i].input(&input);
-                }
+                DeviceId::Router(_) => self.routers[i].input(&input),
+                DeviceId::Switch(_) => self.switches[i].input(&input),
+                DeviceId::Desktop(_) => self.desktops[i].input(&input),
+            },
+            DeviceSetQuery::Delete => match id {
+                DeviceId::Router(_) => self.routers[i].attributes.deleted = true,
+                DeviceId::Switch(_) => self.switches[i].attributes.deleted = true,
+                DeviceId::Desktop(_) => self.desktops[i].attributes.deleted = true,
             },
         }
     }
@@ -300,7 +318,7 @@ impl DeviceRepository {
         self.disconnect(d1, p1);
         self.disconnect(d2, p2);
 
-        let (d1_i, d2_i) = (d1.as_usize(), d2.as_usize());
+        let (d1_i, d2_i) = (self.lookup(d1), self.lookup(d2));
 
         fn connect_desktop(
             dr: &mut DeviceRepository,
@@ -450,8 +468,10 @@ impl DeviceRepository {
                 adj.retain(|(p, _, _)| *p != d2_port);
             }
 
-            _dc(self, d1_id, d1_id.as_usize(), d1_port);
-            _dc(self, d2_id, d2_id.as_usize(), d2_port);
+            let (d1_i, d2_i) = (self.lookup(d1_id), self.lookup(d2_id));
+
+            _dc(self, d1_id, d1_i, d1_port);
+            _dc(self, d2_id, d2_i, d2_port);
             return;
         }
     }
@@ -464,8 +484,10 @@ impl DeviceRepository {
         let mut set: HashSet<DeviceId> = HashSet::new(); // Only need to draw a line once per device
         for (id, adjs) in self.adj_devices.iter() {
             let c = self.get(DeviceGetQuery::Id(*id)).unwrap();
+            let i = self.lookup(*id);
 
             for (e_port, adj_id, _) in adjs {
+                let adj_i = self.lookup(*adj_id);
                 let target = self.get(DeviceGetQuery::Id(*adj_id)).unwrap();
                 let start_pos = Vector2::new(c.pos.x, c.pos.y);
                 let end_pos = Vector2::new(target.pos.x, target.pos.y);
@@ -475,8 +497,8 @@ impl DeviceRepository {
                 set.insert(*id);
 
                 let is_port_up = match id {
-                    DeviceId::Switch(i) => self.switches[*i].device.is_port_up(*e_port),
-                    DeviceId::Router(i) => self.routers[*i].device.is_port_up(*e_port),
+                    DeviceId::Switch(_) => self.switches[i].device.is_port_up(*e_port),
+                    DeviceId::Router(_) => self.routers[adj_i].device.is_port_up(*e_port),
                     _ => true,
                 };
 
@@ -588,16 +610,76 @@ impl DeviceRepository {
     }
 
     pub fn update(&mut self) {
+        let mut delete = Vec::<DeviceId>::new();
+
         for component in &mut self.routers {
-            component.device.tick();
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.device.tick();
+            }
         }
 
         for component in &mut self.switches {
-            component.device.tick();
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.device.tick();
+            }
         }
 
-        for componnet in &mut self.desktops {
-            componnet.tick();
+        for component in &mut self.desktops {
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.tick();
+            }
+        }
+
+        for id in delete {
+            let devices = self.adj_devices.get(&id).cloned();
+            if let Some(devices) = devices {
+                for (port, _, _) in devices {
+                    self.disconnect(id, port);
+                }
+            }
+
+            let i = self.lookup(id);
+            self.adj_devices.remove(&id);
+            self.lookup.remove(&id.as_u64());
+
+            // Remove from entity list and sim
+            match id {
+                DeviceId::Desktop(_) => {
+                    self.cable_simulator
+                        .remove(self.desktops[i].device.interface.ethernet.port());
+                    self.desktops.swap_remove(i);
+
+                    if i < self.desktops.len() {
+                        self.lookup
+                            .insert(self.desktops[i].attributes.id.as_u64(), i);
+                    }
+                }
+                DeviceId::Switch(_) => {
+                    self.cable_simulator
+                        .removes(self.switches[i].device.ports());
+                    self.switches.swap_remove(i);
+
+                    if i < self.switches.len() {
+                        self.lookup
+                            .insert(self.switches[i].attributes.id.as_u64(), i);
+                    }
+                }
+                DeviceId::Router(_) => {
+                    self.cable_simulator.removes(self.routers[i].device.ports());
+                    self.routers.swap_remove(i);
+
+                    if i < self.routers.len() {
+                        self.lookup
+                            .insert(self.routers[i].attributes.id.as_u64(), i);
+                    }
+                }
+            }
         }
 
         self.cable_simulator.tick();

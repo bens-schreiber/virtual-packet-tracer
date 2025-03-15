@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, panic};
+use std::{cell::RefCell, collections::VecDeque, panic, rc::Rc};
 
 use raylib::prelude::*;
 
@@ -189,8 +189,8 @@ impl Gui {
                     self.terminal_out.clear();
                 }
                 1 => {
-                    // dr.remove(dropdown.device);
-                    self.edit_dropdown = None;
+                    dr.set(dropdown.device, DeviceSetQuery::Delete);
+                    self.reset_states();
                 }
                 _ => {
                     self.edit_dropdown = Some(dropdown);
@@ -475,8 +475,7 @@ impl Gui {
             }
 
             // Output
-            self.terminal_out
-                .extend(dr.get_terminal(da.id).iter().cloned());
+            self.terminal_out.extend(dr.get_terminal_out(da.id));
 
             let mut out_y = terminal_y;
             for line in self
