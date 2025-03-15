@@ -220,8 +220,8 @@ impl Switch {
     }
 
     /// Returns the STP state of the port.
-    pub fn port_state(&self, port_id: usize) -> bool {
-        self.ports[port_id].borrow().stp_state == StpState::Discarding
+    pub fn is_port_up(&self, port_id: usize) -> bool {
+        self.ports[port_id].borrow().stp_state != StpState::Discarding
     }
 
     pub fn bridge_priority(&self) -> u16 {

@@ -16,15 +16,15 @@ pub fn run() {
     rl.set_target_fps(30);
 
     let mut gui = Gui::default();
-    let mut devices = device::DeviceRepository::default();
+    let mut dr = device::DeviceRepository::default();
 
     while !rl.window_should_close() {
-        gui.update(&rl, &mut devices);
-        devices.update(&rl);
+        dr.update();
+        gui.update(&rl, &mut dr);
 
         let mut d = rl.begin_drawing(&thread);
-        gui.render(&mut d);
-        devices.render(&mut d);
+        dr.render(&mut d);
+        gui.render(&mut d, &dr);
         d.clear_background(Color::BLACK);
     }
 }
