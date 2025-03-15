@@ -1,36 +1,10 @@
-use std::{cell::RefCell, collections::VecDeque, panic, rc::Rc};
+use std::collections::VecDeque;
 
 use raylib::prelude::*;
 
 use crate::simulation::{device::DeviceAttributes, utils};
 
 use super::device::{DeviceGetQuery, DeviceId, DeviceKind, DeviceRepository, DeviceSetQuery};
-
-struct FrameTimer {
-    threshold: i32,
-    value: i32,
-}
-
-impl FrameTimer {
-    fn new(threshold: i32) -> Self {
-        Self {
-            threshold,
-            value: 0,
-        }
-    }
-
-    fn ready(&mut self) -> bool {
-        if self.value > 0 {
-            self.value -= 1;
-            return false;
-        }
-        true
-    }
-
-    fn set(&mut self) {
-        self.value = self.threshold;
-    }
-}
 
 #[derive(Copy, Clone)]
 struct Dropdown {
@@ -53,6 +27,7 @@ impl Dropdown {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum GuiMode {
+    EthernetDisconnect,
     EthernetConnection,
     Drag,
 }
@@ -76,7 +51,7 @@ pub struct Gui {
     ethernet_dropdown: Option<Dropdown>,
     edit_dropdown: Option<Dropdown>,
 
-    frame_timer: FrameTimer,
+    gui_consume_this_click: bool,
 
     drag_device: Option<DeviceId>,
     connect_d1: Option<(DeviceId, usize)>,
@@ -95,7 +70,7 @@ impl Default for Gui {
             selection: None,
             ethernet_dropdown: None,
             edit_dropdown: None,
-            frame_timer: FrameTimer::new(1),
+            gui_consume_this_click: true,
             connect_d1: None,
             connect_d2: None,
             terminal_out: VecDeque::new(),
@@ -126,8 +101,6 @@ impl Gui {
         let (box_width, box_height) = (55, 55);
         let (screen_width, screen_height) = (d.get_screen_width(), d.get_screen_height());
         let mouse_pos = d.get_mouse_position();
-
-        let can_listen_mouse_event = self.frame_timer.ready();
 
         // Gui Mode Rendering
         // -----------------------------------
@@ -163,12 +136,12 @@ impl Gui {
             }
             let pos = da.unwrap().pos;
 
-            let options = vec!["Terminal", "Delete"];
-            let height = 6 * FONT_SIZE;
+            let options = vec!["Terminal", "Delete; Disconnect"];
+            let height = 10 * FONT_SIZE;
             dropdown.bounds = Rectangle::new(
                 pos.x + PADDING as f32,
                 pos.y + PADDING as f32,
-                (DROPDOWN_WIDTH / 2) as f32,
+                DROPDOWN_WIDTH as f32 / 1.5,
                 height as f32,
             );
 
@@ -192,23 +165,25 @@ impl Gui {
                     dr.set(dropdown.device, DeviceSetQuery::Delete);
                     self.reset_states();
                 }
+                2 => {
+                    self.edit_dropdown = None;
+                    self.ethernet_dropdown = Some(Dropdown::new(dropdown.device));
+                    self.mode = Some(GuiMode::EthernetDisconnect);
+                    self.gui_consume_this_click = false; // Ethernet dropdown will immediately consume click, stop it from doing so.
+                }
                 _ => {
                     self.edit_dropdown = Some(dropdown);
                 }
             }
         }
-
         // -----------------------------------
 
         // Ethernet Dropdown Menu
         // -----------------------------------
-        if !can_listen_mouse_event { // checkmate rust
+        if !self.gui_consume_this_click { // checkmate rust
         } else if let Some(mut dropdown) = self.ethernet_dropdown {
-            let da = dr.get(DeviceGetQuery::Id(dropdown.device));
-            if da.is_none() {
-                panic!("Device not found in repository");
-            }
-            let DeviceAttributes { ports_len, pos, .. } = da.unwrap();
+            let da = dr.get(DeviceGetQuery::Id(dropdown.device)).unwrap();
+            let DeviceAttributes { ports_len, pos, .. } = da;
 
             // A dropdown with ports_len options saying "Ethernet Port 0/i" for desktops, switches and "GigabitEthernet 0/i" for routers
             let height = std::cmp::min(DROPDOWN_MAX_HEIGHT, ports_len as i32 * (3 * FONT_SIZE));
@@ -235,14 +210,23 @@ impl Gui {
             );
 
             if dropdown.value >= 0 {
-                if self.connect_d1.is_none() {
+                if self.mode == Some(GuiMode::EthernetDisconnect) {
+                    dr.set(
+                        dropdown.device,
+                        DeviceSetQuery::Disconnect(dropdown.value as usize),
+                    );
+                    self.mode = None;
+                }
+                //
+                else if self.connect_d1.is_none() {
                     self.connect_d1 = Some((dropdown.device, dropdown.value as usize));
                     self.mode = Some(GuiMode::EthernetConnection);
-                } else if self.connect_d2.is_none() {
+                }
+                //
+                else if self.connect_d2.is_none() {
                     self.connect_d2 = Some((dropdown.device, dropdown.value as usize));
                     self.mode = None;
                 }
-
                 self.ethernet_dropdown = None;
             } else {
                 self.ethernet_dropdown = Some(dropdown);
@@ -299,7 +283,7 @@ impl Gui {
             let x = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
 
-            if d.gui_button(bounds, None) && can_listen_mouse_event {
+            if d.gui_button(bounds, None) && self.gui_consume_this_click {
                 self.selection = Some(*kind);
             }
 
@@ -345,7 +329,7 @@ impl Gui {
             let y = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
 
-            if d.gui_button(bounds, None) && can_listen_mouse_event {
+            if d.gui_button(bounds, None) && self.gui_consume_this_click {
                 self.selection = Some(*kind);
             }
 
@@ -505,7 +489,10 @@ impl Gui {
         );
         table_y += 3.0 * PADDING as f32;
 
+        // -----------------------------------
+
         d.gui_load_style_default();
+        self.gui_consume_this_click = true;
     }
 
     pub fn update(&mut self, rl: &RaylibHandle, dr: &mut DeviceRepository) {
@@ -581,7 +568,7 @@ impl Gui {
             return;
         }
 
-        self.frame_timer.set(); // RayGUI does click logic in render. If a click is consumed here, we don't want the render to consume it again.
+        self.gui_consume_this_click = false; // RayGUI does click logic in render. If a click is consumed here, we don't want the render to consume it again.
 
         // Ethernet Connection Mode
         // -----------------------------------
