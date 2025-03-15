@@ -249,6 +249,10 @@ impl Switch {
         self.root_bid = crate::bridge_id!(self.mac_address, priority);
     }
 
+    pub fn mac_table(&self) -> HashMap<MacAddress, usize> {
+        self.table.clone()
+    }
+
     /// Returns all ports in the designated role.
     #[cfg(test)]
     pub(crate) fn designated_ports(&self) -> Vec<usize> {

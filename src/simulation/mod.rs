@@ -24,7 +24,7 @@ pub fn run() {
 
         let mut d = rl.begin_drawing(&thread);
         dr.render(&mut d);
-        gui.render(&mut d, &dr);
+        gui.render(&mut d, &mut dr);
         d.clear_background(Color::BLACK);
     }
 }

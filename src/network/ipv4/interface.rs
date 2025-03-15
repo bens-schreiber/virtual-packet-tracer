@@ -326,6 +326,10 @@ impl Ipv4Interface {
         ipv4_frames
     }
 
+    pub fn arp_table(&self) -> HashMap<Ipv4Address, MacAddress> {
+        self.arp_table.clone()
+    }
+
     fn _ip_is_self(&self, ip: Ipv4Address) -> bool {
         ip == self.ip_address || ip == localhost!()
     }

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use raylib::prelude::*;
 
@@ -49,6 +49,7 @@ pub enum DeviceSetQuery {
 }
 
 pub trait Device {
+    fn label(&self) -> &str;
     fn pos(&self) -> Vector2;
     fn id(&self) -> DeviceId;
     fn is_port_up(&self, _port: usize) -> bool {
@@ -57,6 +58,8 @@ pub trait Device {
     fn ports_len(&self) -> usize {
         1
     }
+    fn input(&mut self, input: String);
+    fn out(&mut self) -> Option<String>;
 }
 
 pub struct DeviceRepository {
@@ -103,6 +106,7 @@ impl DeviceRepository {
                     label: format!("Router {}", label),
                     pos,
                     router: Router::from_seed(self.mac_seed),
+                    terminal: Terminal::<Router>::new_router(),
                 });
                 self.mac_seed += 8;
             }
@@ -116,6 +120,7 @@ impl DeviceRepository {
                     label: format!("Switch {}", label),
                     pos,
                     switch: Switch::from_seed(self.mac_seed, label as u16),
+                    terminal: Terminal::<Switch>::new_switch(),
                 });
                 self.mac_seed += 32;
             }
@@ -129,9 +134,52 @@ impl DeviceRepository {
                     label: format!("Desktop {}", label),
                     pos,
                     desktop: Desktop::from_seed(self.mac_seed),
+                    terminal: Terminal::<Desktop>::new_desktop(),
                 });
                 self.mac_seed += 1;
             }
+        }
+    }
+
+    // todo: get and get_mut could have a common implementation, not sure how to get there with rust
+    pub fn get_mut(&mut self, query: DeviceGetQuery) -> Option<&mut dyn Device> {
+        match query {
+            // Linear search, no point in optimizing this for now.
+            DeviceGetQuery::Pos(pos) => {
+                for router in self.routers.iter_mut() {
+                    if router.pos.distance_to(pos) < ROUTER_DISPLAY_RADIUS {
+                        return Some(router);
+                    }
+                }
+                for switch in self.switches.iter_mut() {
+                    let rec = Rectangle {
+                        x: switch.pos.x,
+                        y: switch.pos.y,
+                        width: SWITCH_DISPLAY_LENGTH as f32,
+                        height: SWITCH_DISPLAY_LENGTH as f32,
+                    };
+                    if rec.check_collision_point_rec(pos) {
+                        return Some(switch);
+                    }
+                }
+                for desktop in self.desktops.iter_mut() {
+                    let rec = Rectangle {
+                        x: desktop.pos.x,
+                        y: desktop.pos.y,
+                        width: DESKTOP_DISPLAY_SIZE as f32,
+                        height: DESKTOP_DISPLAY_SIZE as f32,
+                    };
+                    if rec.check_collision_point_rec(pos) {
+                        return Some(desktop);
+                    }
+                }
+                None
+            }
+            DeviceGetQuery::Id(id) => match id {
+                DeviceId::Router(i) => self.routers.get_mut(i).map(|r| r as &mut dyn Device),
+                DeviceId::Switch(i) => self.switches.get_mut(i).map(|s| s as &mut dyn Device),
+                DeviceId::Desktop(i) => self.desktops.get_mut(i).map(|d| d as &mut dyn Device),
+            },
         }
     }
 
@@ -454,20 +502,20 @@ impl DeviceRepository {
         }
 
         for desktop in &mut self.desktops {
-            utils::draw_icon(
-                GuiIconName::ICON_MONITOR,
-                desktop.pos.x as i32,
-                desktop.pos.y as i32,
-                3,
-                Color::WHITE,
-            );
-
             d.draw_rectangle(
                 desktop.pos.x as i32,
                 desktop.pos.y as i32,
                 DESKTOP_DISPLAY_SIZE,
                 DESKTOP_DISPLAY_SIZE,
                 Color::BLACK,
+            );
+
+            utils::draw_icon(
+                GuiIconName::ICON_MONITOR,
+                desktop.pos.x as i32,
+                desktop.pos.y as i32,
+                3,
+                Color::WHITE,
             );
 
             d.draw_text(
@@ -502,9 +550,14 @@ struct RouterDevice {
     label: String,
     pos: Vector2,
     router: Router,
+    terminal: Terminal<Router>,
 }
 
 impl Device for RouterDevice {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
     fn pos(&self) -> Vector2 {
         self.pos
     }
@@ -516,16 +569,35 @@ impl Device for RouterDevice {
     fn is_port_up(&self, port: usize) -> bool {
         self.router.is_port_up(port)
     }
+
+    fn ports_len(&self) -> usize {
+        self.router.ports().len()
+    }
+
+    fn input(&mut self, input: String) {
+        self.terminal.execute(&mut self.router, &input);
+    }
+
+    fn out(&mut self) -> Option<String> {
+        self.terminal.out_buf.pop_front()
+    }
 }
+
+impl RouterDevice {}
 
 struct SwitchDevice {
     id: usize,
     label: String,
     pos: Vector2,
     switch: Switch,
+    terminal: Terminal<Switch>,
 }
 
 impl Device for SwitchDevice {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
     fn pos(&self) -> Vector2 {
         self.pos
             + Vector2::new(
@@ -545,15 +617,28 @@ impl Device for SwitchDevice {
     fn ports_len(&self) -> usize {
         self.switch.ports().len()
     }
+
+    fn input(&mut self, input: String) {
+        self.terminal.execute(&mut self.switch, &input);
+    }
+
+    fn out(&mut self) -> Option<String> {
+        self.terminal.out_buf.pop_front()
+    }
 }
 struct DesktopDevice {
     id: usize,
     label: String,
     pos: Vector2,
     desktop: Desktop,
+    terminal: Terminal<Desktop>,
 }
 
 impl Device for DesktopDevice {
+    fn label(&self) -> &str {
+        &self.label
+    }
+
     fn pos(&self) -> Vector2 {
         self.pos
             + Vector2::new(
@@ -564,5 +649,405 @@ impl Device for DesktopDevice {
 
     fn id(&self) -> DeviceId {
         DeviceId::Desktop(self.id)
+    }
+
+    fn input(&mut self, input: String) {
+        self.terminal.execute(&mut self.desktop, &input);
+    }
+
+    fn out(&mut self) -> Option<String> {
+        self.terminal.out_buf.pop_front()
+    }
+}
+
+type CommandFunction<T> = fn(&mut Terminal<T>, &mut T, &[&str]) -> ();
+struct Terminal<T> {
+    out_buf: VecDeque<String>,
+    dict: HashMap<String, (CommandFunction<T>, String)>,
+}
+
+impl<T> Terminal<T> {
+    fn new() -> Self {
+        let mut dict = HashMap::new();
+
+        // Insert the help command into the dictionary
+        dict.insert(
+            "help".to_string(),
+            (
+                Self::help as CommandFunction<T>,
+                "Prints this help message".to_string(),
+            ),
+        );
+
+        dict.insert(
+            "clear".to_string(),
+            (
+                Self::clear as CommandFunction<T>,
+                "Clear the terminal screen".to_string(),
+            ),
+        );
+
+        Self {
+            out_buf: VecDeque::new(),
+            dict,
+        }
+    }
+
+    fn help(term: &mut Terminal<T>, _device: &mut T, _args: &[&str]) {
+        for (cmd, (_, manual)) in term.dict.iter() {
+            term.out_buf.push_back(format!("{}: {}", cmd, manual));
+        }
+    }
+
+    fn clear(term: &mut Terminal<T>, _device: &mut T, _args: &[&str]) {
+        // append a bunch of newlines to clear the terminal
+        for _ in 0..100 {
+            term.out_buf.push_back("".to_string());
+        }
+    }
+
+    fn execute(&mut self, device: &mut T, input: &str) {
+        if input.is_empty() {
+            return;
+        }
+
+        let mut args = input.split_whitespace();
+        let cmd = args.next().unwrap_or_default();
+
+        if let Some((func, _)) = self.dict.get(cmd) {
+            func(self, device, &args.collect::<Vec<&str>>());
+        } else {
+            self.out_buf
+                .push_back(format!("Error: '{}' is not a valid command", cmd));
+        }
+    }
+}
+
+macro_rules! ipv4_fmt {
+    ($ip:expr) => {
+        format!("{}.{}.{}.{}", $ip[0], $ip[1], $ip[2], $ip[3])
+    };
+}
+
+macro_rules! mac_fmt {
+    ($mac:expr) => {
+        format!(
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            $mac[0], $mac[1], $mac[2], $mac[3], $mac[4], $mac[5]
+        )
+    };
+}
+
+impl Terminal<Router> {
+    fn new_router() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "enable".to_string(),
+            (
+                Self::enable as CommandFunction<Router>,
+                "Enable a port. Usage: enable <port> <ip> <subnet>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "rip".to_string(),
+            (
+                Self::rip as CommandFunction<Router>,
+                "Enable or disable RIP. Usage: rip <port>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "routes".to_string(),
+            (
+                Self::routes as CommandFunction<Router>,
+                "Print the routing table".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "ipconfig".to_string(),
+            (
+                Self::ifconfig as CommandFunction<Router>,
+                "Print the current IP configuration of the router".to_string(),
+            ),
+        );
+
+        term
+    }
+
+    fn enable(term: &mut Terminal<Router>, router: &mut Router, args: &[&str]) {
+        if args.len() != 3 {
+            term.out_buf
+                .push_back("Usage: enable <port> <ip> <subnet>".to_string());
+            return;
+        }
+
+        let port = match args[0].parse::<usize>() {
+            Ok(port) => port,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid port", args[0]));
+                return;
+            }
+        };
+
+        let ip = match args[1].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[1]));
+                return;
+            }
+        };
+
+        let subnet = match args[2].parse::<std::net::Ipv4Addr>() {
+            Ok(subnet) => subnet,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid subnet mask", args[2]));
+                return;
+            }
+        };
+
+        router.enable_interface(port, ip.octets(), subnet.octets());
+        term.out_buf.push_back(format!(
+            "Port {} enabled with IP {} and subnet mask {}",
+            port, ip, subnet
+        ));
+    }
+
+    fn rip(term: &mut Terminal<Router>, router: &mut Router, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf.push_back("Usage: rip <port>".to_string());
+            return;
+        }
+
+        let port = match args[0].parse::<usize>() {
+            Ok(port) => port,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid port", args[0]));
+                return;
+            }
+        };
+
+        match router.enable_rip(port) {
+            Ok(_) => {
+                term.out_buf
+                    .push_back(format!("RIP enabled on port {}", port));
+            }
+            Err(e) => {
+                term.out_buf.push_back(format!("Error: {}", e));
+            }
+        }
+    }
+
+    fn routes(term: &mut Terminal<Router>, router: &mut Router, _args: &[&str]) {
+        term.out_buf.push_back("Routing Table:".to_string());
+
+        for (key, route) in router.routing_table().iter() {
+            term.out_buf.push_back(format!(
+                "{} -> {} via port {}",
+                ipv4_fmt!(key),
+                ipv4_fmt!(route.ip_address),
+                route.port
+            ));
+        }
+    }
+
+    fn ifconfig(term: &mut Terminal<Router>, router: &mut Router, _args: &[&str]) {
+        term.out_buf.push_back("IP Configuration:".to_string());
+
+        for (ip, subnet, port, enabled, rip_enabled) in router.interface_config().iter() {
+            term.out_buf.push_back(format!(
+                "Port {}: IP: {}, Subnet: {}, Enabled: {}, RIP: {}",
+                port,
+                ipv4_fmt!(ip),
+                ipv4_fmt!(subnet),
+                enabled,
+                rip_enabled
+            ));
+        }
+    }
+}
+
+impl Terminal<Switch> {
+    fn new_switch() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "stp".to_string(),
+            (
+                Self::stp as CommandFunction<Switch>,
+                "Enable or disable Spanning Tree Protocol. Usage: stp <priority>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "table".to_string(),
+            (
+                Self::table as CommandFunction<Switch>,
+                "Print the MAC address table".to_string(),
+            ),
+        );
+
+        term
+    }
+
+    fn stp(term: &mut Terminal<Switch>, switch: &mut Switch, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf.push_back("Usage: stp <priority>".to_string());
+            return;
+        }
+
+        let priority = match args[0].parse::<u16>() {
+            Ok(priority) => priority,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid priority", args[0]));
+                return;
+            }
+        };
+
+        switch.set_bridge_priority(priority);
+        switch.init_stp();
+        term.out_buf.push_back(format!(
+            "Spanning Tree Protocol priority set to {}",
+            priority
+        ));
+    }
+
+    fn table(term: &mut Terminal<Switch>, switch: &mut Switch, _args: &[&str]) {
+        term.out_buf.push_back("MAC Address Table:".to_string());
+        for (mac, port) in switch.mac_table().iter() {
+            term.out_buf
+                .push_back(format!("{} -> Port {}", mac_fmt!(mac), port));
+        }
+    }
+}
+
+impl Terminal<Desktop> {
+    fn new_desktop() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "ipset".to_string(),
+            (
+                Self::ipset as CommandFunction<Desktop>,
+                "Set the IP address of the desktop. Usage: ipset <ipv4 addr> <subnet addr>"
+                    .to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "dgateway".to_string(),
+            (
+                Self::dgateway as CommandFunction<Desktop>,
+                "Set the default gateway of the desktop. Usage: dgateway <ipv4 addr>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "ipconfig".to_string(),
+            (
+                Self::ipconfig as CommandFunction<Desktop>,
+                "Print the current IP configuration of the desktop".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "arptab".to_string(),
+            (
+                Self::arptab as CommandFunction<Desktop>,
+                "Print the ARP table".to_string(),
+            ),
+        );
+
+        term
+    }
+
+    fn ipset(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 2 {
+            term.out_buf
+                .push_back("Usage: ipset <ipv4 addr> <subnet mask>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        let subnet = match args[1].parse::<std::net::Ipv4Addr>() {
+            Ok(subnet) => subnet,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid subnet mask", args[1]));
+                return;
+            }
+        };
+
+        desktop.interface.ip_address = ip.octets();
+        desktop.interface.subnet_mask = subnet.octets();
+
+        term.out_buf.push_back(format!(
+            "IP address set to {} with subnet mask {}",
+            ip, subnet
+        ));
+    }
+
+    fn dgateway(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf
+                .push_back("Usage: dgateway <ipv4 addr>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        desktop.interface.default_gateway = Some(ip.octets());
+
+        term.out_buf
+            .push_back(format!("Default gateway set to {}", ip));
+    }
+
+    fn ipconfig(term: &mut Terminal<Desktop>, desktop: &mut Desktop, _args: &[&str]) {
+        term.out_buf.push_back(format!(
+            "IP Address: {}",
+            ipv4_fmt!(desktop.interface.ip_address)
+        ));
+
+        term.out_buf.push_back(format!(
+            "Subnet Mask: {}",
+            ipv4_fmt!(desktop.interface.subnet_mask)
+        ));
+        if let Some(gateway) = desktop.interface.default_gateway {
+            term.out_buf
+                .push_back(format!("Default Gateway: {}", ipv4_fmt!(gateway)));
+        } else {
+            term.out_buf.push_back("Default Gateway: None".to_string());
+        }
+
+        let mac = desktop.interface.ethernet.mac_address;
+        term.out_buf
+            .push_back(format!("MAC Address: {}", mac_fmt!(mac)));
+    }
+
+    fn arptab(term: &mut Terminal<Desktop>, desktop: &mut Desktop, _args: &[&str]) {
+        term.out_buf.push_back("ARP Table:".to_string());
+        for (ip, mac) in desktop.interface.arp_table().iter() {
+            term.out_buf
+                .push_back(format!("{} -> {}", ipv4_fmt!(ip), mac_fmt!(mac)));
+        }
     }
 }

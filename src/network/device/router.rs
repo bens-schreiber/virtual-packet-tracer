@@ -13,12 +13,12 @@ use crate::{
 use super::cable::EthernetPort;
 
 /// A route in the router's routing table.
-#[derive(Debug, Eq, PartialEq, Hash)]
-struct Route {
-    ip_address: Ipv4Address, // Network address
-    subnet_mask: Ipv4Address,
-    metric: u32, // Hops until the destination
-    port: usize,
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub struct Route {
+    pub ip_address: Ipv4Address, // Network address
+    pub subnet_mask: Ipv4Address,
+    pub metric: u32, // Hops until the destination
+    pub port: usize,
 }
 
 impl Route {
@@ -304,6 +304,24 @@ impl Router {
 
     pub fn is_port_up(&self, port: usize) -> bool {
         self.ports[port].borrow().enabled
+    }
+
+    pub fn routing_table(&self) -> HashMap<Ipv4Address, Route> {
+        self.table.clone()
+    }
+
+    /// Returns (IP, Subnet, Port, Enabled, RIP Enabled)
+    pub fn interface_config(&self) -> Vec<(Ipv4Address, Ipv4Address, usize, bool, bool)> {
+        self.ports
+            .iter()
+            .enumerate()
+            .map(|(i, rp)| {
+                let rp = rp.borrow();
+                let ip = rp.interface.borrow().ip_address;
+                let subnet = rp.interface.borrow().subnet_mask;
+                (ip, subnet, i, rp.enabled, rp.rip_enabled)
+            })
+            .collect()
     }
 }
 
