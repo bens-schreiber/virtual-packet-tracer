@@ -2,7 +2,7 @@ use std::{collections::VecDeque, panic};
 
 use raylib::prelude::*;
 
-use crate::simulation::utils;
+use crate::simulation::{device::DeviceAttributes, utils};
 
 use super::device::{DeviceGetQuery, DeviceId, DeviceKind, DeviceRepository, DeviceSetQuery};
 
@@ -136,8 +136,8 @@ impl Gui {
                 if let (Some(d1), Some(d2)) =
                     (self.connect_d1, self.ethernet_dropdown.map(|d| d.device))
                 {
-                    let pos1 = dr.get(DeviceGetQuery::Id(d1.0)).map(|d| d.pos());
-                    let pos2 = dr.get(DeviceGetQuery::Id(d2)).map(|d| d.pos());
+                    let pos1 = dr.get(DeviceGetQuery::Id(d1.0)).map(|da| da.pos);
+                    let pos2 = dr.get(DeviceGetQuery::Id(d2)).map(|da| da.pos);
 
                     if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
                         d.draw_line_ex(pos1, pos2, 2.0, Color::WHITE);
@@ -145,7 +145,7 @@ impl Gui {
                 }
                 //
                 else if let Some((device, _)) = self.connect_d1 {
-                    if let Some(pos1) = dr.get(DeviceGetQuery::Id(device)).map(|d| d.pos()) {
+                    if let Some(pos1) = dr.get(DeviceGetQuery::Id(device)).map(|da| da.pos) {
                         d.draw_line_ex(pos1, mouse_pos, 2.0, Color::WHITE);
                     }
                 }
@@ -157,11 +157,11 @@ impl Gui {
         // Edit Dropdown Menu
         // -----------------------------------
         if let Some(mut dropdown) = self.edit_dropdown {
-            let device = dr.get(DeviceGetQuery::Id(dropdown.device));
-            if device.is_none() {
+            let da = dr.get(DeviceGetQuery::Id(dropdown.device));
+            if da.is_none() {
                 panic!("Device not found in repository");
             }
-            let pos = device.unwrap().pos();
+            let pos = da.unwrap().pos;
 
             let options = vec!["Terminal", "Delete"];
             let height = 6 * FONT_SIZE;
@@ -204,12 +204,11 @@ impl Gui {
         // -----------------------------------
         if !can_listen_mouse_event { // checkmate rust
         } else if let Some(mut dropdown) = self.ethernet_dropdown {
-            let device = dr.get(DeviceGetQuery::Id(dropdown.device));
-            if device.is_none() {
+            let da = dr.get(DeviceGetQuery::Id(dropdown.device));
+            if da.is_none() {
                 panic!("Device not found in repository");
             }
-            let pos = device.unwrap().pos();
-            let ports_len = device.unwrap().ports_len();
+            let DeviceAttributes { ports_len, pos, .. } = da.unwrap();
 
             // A dropdown with ports_len options saying "Ethernet Port 0/i" for desktops, switches and "GigabitEthernet 0/i" for routers
             let height = std::cmp::min(DROPDOWN_MAX_HEIGHT, ports_len as i32 * (3 * FONT_SIZE));
@@ -437,12 +436,11 @@ impl Gui {
             * ((FONT_SIZE + PADDING / 2) as f32)
             + terminal_y;
 
-        if let Some(Some(device)) = self
+        if let Some(Some(da)) = self
             .terminal_device
-            .map(|id| dr.get_mut(DeviceGetQuery::Id(id)))
+            .map(|id| dr.get(DeviceGetQuery::Id(id)))
         {
-            let label = device.label();
-            let prompt = format!("{} %", label);
+            let prompt = format!("{} %", da.label);
             let label_size = d.measure_text(&prompt, FONT_SIZE);
             let max_text_size = d.measure_text("W", FONT_SIZE) * 30; // roughly 30 characters
 
@@ -459,7 +457,10 @@ impl Gui {
                 true,
             ) && d.is_key_pressed(KeyboardKey::KEY_ENTER)
             {
-                device.input(utils::array_to_string(&self.terminal_buffer));
+                dr.set(
+                    da.id,
+                    DeviceSetQuery::TerminalInput(utils::array_to_string(&self.terminal_buffer)),
+                );
 
                 self.terminal_out.push_back(format!(
                     "{} {}",
@@ -474,9 +475,8 @@ impl Gui {
             }
 
             // Output
-            while let Some(line) = device.out() {
-                self.terminal_out.push_back(line);
-            }
+            self.terminal_out
+                .extend(dr.get_terminal(da.id).iter().cloned());
 
             let mut out_y = terminal_y;
             for line in self
@@ -520,7 +520,7 @@ impl Gui {
         if is_right_mouse_clicked {
             self.edit_dropdown = dr
                 .get(DeviceGetQuery::Pos(mouse_pos))
-                .map(|d| Dropdown::new(d.id()))
+                .map(|da| Dropdown::new(da.id))
                 .or(None);
         }
 
@@ -552,9 +552,9 @@ impl Gui {
         }
 
         if is_left_mouse_down && self.mode == None && self.selection == None {
-            if let Some(d) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
+            if let Some(da) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
                 self.mode = Some(GuiMode::Drag);
-                self.drag_device = Some(d.id());
+                self.drag_device = Some(da.id);
             }
             return;
         }
@@ -587,8 +587,8 @@ impl Gui {
         // Ethernet Connection Mode
         // -----------------------------------
         if self.selection == Some(GuiButtonClickKind::Ethernet) {
-            if let Some(d) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
-                self.ethernet_dropdown = Some(Dropdown::new(d.id()));
+            if let Some(da) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
+                self.ethernet_dropdown = Some(Dropdown::new(da.id));
             } else {
                 self.reset_states();
             }

@@ -13,10 +13,13 @@ use crate::{
         ethernet::ByteSerializable,
         ipv4::{IcmpFrame, IcmpType},
     },
+    simulation::utils,
     tick::{TickTimer, Tickable},
 };
 
-use super::utils;
+const ROUTER_DISPLAY_RADIUS: f32 = 25.0;
+const SWITCH_DISPLAY_LENGTH: i32 = 45;
+const DESKTOP_DISPLAY_SIZE: i32 = SWITCH_DISPLAY_LENGTH; // roughly
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceId {
@@ -50,26 +53,82 @@ pub enum DeviceSetQuery {
     Pos(Vector2),
     Connect(DeviceId, usize, usize), // Adj Device, Self Port, Adj Port
     Disconnect(usize),
+    TerminalInput(String),
 }
 
-pub trait Device {
-    fn label(&self) -> &str;
-    fn pos(&self) -> Vector2;
-    fn id(&self) -> DeviceId;
-    fn is_port_up(&self, _port: usize) -> bool {
-        true // TODO: port_status => Up/Down/Waiting
+#[derive(Clone)]
+pub struct DeviceAttributes {
+    pub id: DeviceId,
+    pub label: String,
+    pub pos: Vector2,
+    pub ports_len: usize,
+}
+
+struct Components<T> {
+    attributes: DeviceAttributes,
+    terminal: Terminal<T>,
+    device: T,
+}
+
+impl<T> Components<T> {
+    fn new(
+        id: DeviceId,
+        terminal: Terminal<T>,
+        label: String,
+        pos: Vector2,
+        device: T,
+        ports_len: usize,
+    ) -> Self {
+        Self {
+            attributes: DeviceAttributes {
+                id,
+                label,
+                pos,
+                ports_len,
+            },
+            terminal,
+            device,
+        }
     }
-    fn ports_len(&self) -> usize {
-        1
+
+    fn input(&mut self, input: &str) {
+        self.terminal.execute(&mut self.device, input);
     }
-    fn input(&mut self, input: String);
-    fn out(&mut self) -> Option<String>;
+}
+
+impl Components<Desktop> {
+    fn tick(&mut self) {
+        self.terminal.tick(&mut self.device);
+        self.device.tick();
+    }
+
+    fn attributes(&self) -> DeviceAttributes {
+        DeviceAttributes {
+            pos: Vector2::new(
+                self.attributes.pos.x + (DESKTOP_DISPLAY_SIZE / 2) as f32,
+                self.attributes.pos.y + (DESKTOP_DISPLAY_SIZE / 2) as f32,
+            ),
+            ..self.attributes.clone()
+        }
+    }
+}
+
+impl Components<Switch> {
+    fn attributes(&self) -> DeviceAttributes {
+        DeviceAttributes {
+            pos: Vector2::new(
+                self.attributes.pos.x + (SWITCH_DISPLAY_LENGTH / 2) as f32,
+                self.attributes.pos.y + (SWITCH_DISPLAY_LENGTH / 2) as f32,
+            ),
+            ..self.attributes.clone()
+        }
+    }
 }
 
 pub struct DeviceRepository {
-    routers: Vec<RouterDevice>,
-    switches: Vec<SwitchDevice>,
-    desktops: Vec<DesktopDevice>,
+    routers: Vec<Components<Router>>,
+    switches: Vec<Components<Switch>>,
+    desktops: Vec<Components<Desktop>>,
     label_seeds: (i32, i32, i32), // (router, switch, desktop)
 
     adj_devices: HashMap<DeviceId, Vec<(usize, DeviceId, usize)>>, // Id -> (Self Port, Adjacent Id, Adjacent Port)
@@ -92,10 +151,6 @@ impl Default for DeviceRepository {
     }
 }
 
-const ROUTER_DISPLAY_RADIUS: f32 = 25.0;
-const SWITCH_DISPLAY_LENGTH: i32 = 45;
-const DESKTOP_DISPLAY_SIZE: i32 = SWITCH_DISPLAY_LENGTH; // roughly
-
 impl DeviceRepository {
     pub fn add(&mut self, kind: DeviceKind, pos: Vector2) {
         self.mac_seed += 1;
@@ -105,148 +160,117 @@ impl DeviceRepository {
                     self.label_seeds.0 += 1;
                     self.label_seeds.0
                 };
-                let rd = RouterDevice {
-                    id: self.routers.len(),
-                    label: format!("Router {}", label),
+                let component = Components::new(
+                    DeviceId::Router(self.routers.len()),
+                    Terminal::new_router(),
+                    format!("Router {}", label),
                     pos,
-                    router: Router::from_seed(self.mac_seed),
-                    terminal: Terminal::<Router>::new_router(),
-                };
-                self.cable_simulator.adds(rd.router.ports());
-                self.routers.push(rd);
+                    Router::from_seed(self.mac_seed),
+                    8,
+                );
 
-                self.mac_seed += 8;
+                self.cable_simulator.adds(component.device.ports());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.routers.push(component);
             }
             DeviceKind::Switch => {
                 let label: i32 = {
                     self.label_seeds.1 += 1;
                     self.label_seeds.1
                 };
-                let sw = SwitchDevice {
-                    id: self.switches.len(),
-                    label: format!("Switch {}", label),
+                let component = Components::new(
+                    DeviceId::Switch(self.switches.len()),
+                    Terminal::new_switch(),
+                    format!("Switch {}", label),
                     pos,
-                    switch: Switch::from_seed(self.mac_seed, label as u16),
-                    terminal: Terminal::<Switch>::new_switch(),
-                };
-                self.cable_simulator.adds(sw.switch.ports());
-                self.switches.push(sw);
+                    Switch::from_seed(self.mac_seed, label as u16),
+                    32,
+                );
 
-                self.mac_seed += 32;
+                self.cable_simulator.adds(component.device.ports());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.switches.push(component);
             }
             DeviceKind::Desktop => {
                 let label: i32 = {
                     self.label_seeds.2 += 1;
                     self.label_seeds.2
                 };
-                let dt = DesktopDevice {
-                    id: self.desktops.len(),
-                    label: format!("Desktop {}", label),
+                let component = Components::new(
+                    DeviceId::Desktop(self.desktops.len()),
+                    Terminal::new_desktop(),
+                    format!("Desktop {}", label),
                     pos,
-                    desktop: Desktop::from_seed(self.mac_seed),
-                    terminal: Terminal::<Desktop>::new_desktop(),
-                };
+                    Desktop::from_seed(self.mac_seed),
+                    1,
+                );
+
                 self.cable_simulator
-                    .add(dt.desktop.interface.ethernet.port());
-                self.desktops.push(dt);
-
-                self.mac_seed += 1;
+                    .add(component.device.interface.ethernet.port());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.desktops.push(component);
             }
         }
     }
 
-    // todo: get and get_mut could have a common implementation, not sure how to get there with rust
-    pub fn get_mut(&mut self, query: DeviceGetQuery) -> Option<&mut dyn Device> {
+    pub fn get(&self, query: DeviceGetQuery) -> Option<DeviceAttributes> {
         match query {
             // Linear search, no point in optimizing this for now.
             DeviceGetQuery::Pos(pos) => {
-                for router in self.routers.iter_mut() {
-                    if router.pos.distance_to(pos) < ROUTER_DISPLAY_RADIUS {
-                        return Some(router);
+                for component in self.routers.iter() {
+                    if component.attributes.pos.distance_to(pos) < ROUTER_DISPLAY_RADIUS {
+                        return Some(component.attributes.clone());
                     }
                 }
-                for switch in self.switches.iter_mut() {
+
+                for component in self.switches.iter() {
                     let rec = Rectangle {
-                        x: switch.pos.x,
-                        y: switch.pos.y,
+                        x: component.attributes.pos.x,
+                        y: component.attributes.pos.y,
                         width: SWITCH_DISPLAY_LENGTH as f32,
                         height: SWITCH_DISPLAY_LENGTH as f32,
                     };
                     if rec.check_collision_point_rec(pos) {
-                        return Some(switch);
+                        return Some(component.attributes());
                     }
                 }
-                for desktop in self.desktops.iter_mut() {
+
+                for component in self.desktops.iter() {
                     let rec = Rectangle {
-                        x: desktop.pos.x,
-                        y: desktop.pos.y,
+                        x: component.attributes.pos.x,
+                        y: component.attributes.pos.y,
                         width: DESKTOP_DISPLAY_SIZE as f32,
                         height: DESKTOP_DISPLAY_SIZE as f32,
                     };
                     if rec.check_collision_point_rec(pos) {
-                        return Some(desktop);
-                    }
-                }
-                None
-            }
-            DeviceGetQuery::Id(id) => match id {
-                DeviceId::Router(i) => self.routers.get_mut(i).map(|r| r as &mut dyn Device),
-                DeviceId::Switch(i) => self.switches.get_mut(i).map(|s| s as &mut dyn Device),
-                DeviceId::Desktop(i) => self.desktops.get_mut(i).map(|d| d as &mut dyn Device),
-            },
-        }
-    }
-
-    pub fn get(&self, query: DeviceGetQuery) -> Option<&dyn Device> {
-        match query {
-            // Linear search, no point in optimizing this for now.
-            DeviceGetQuery::Pos(pos) => {
-                for router in self.routers.iter() {
-                    if router.pos.distance_to(pos) < ROUTER_DISPLAY_RADIUS {
-                        return Some(router);
-                    }
-                }
-
-                for switch in self.switches.iter() {
-                    let rec = Rectangle {
-                        x: switch.pos.x,
-                        y: switch.pos.y,
-                        width: SWITCH_DISPLAY_LENGTH as f32,
-                        height: SWITCH_DISPLAY_LENGTH as f32,
-                    };
-                    if rec.check_collision_point_rec(pos) {
-                        return Some(switch);
-                    }
-                }
-
-                for desktop in self.desktops.iter() {
-                    let rec = Rectangle {
-                        x: desktop.pos.x,
-                        y: desktop.pos.y,
-                        width: DESKTOP_DISPLAY_SIZE as f32,
-                        height: DESKTOP_DISPLAY_SIZE as f32,
-                    };
-                    if rec.check_collision_point_rec(pos) {
-                        return Some(desktop);
+                        return Some(component.attributes());
                     }
                 }
 
                 None
             }
             DeviceGetQuery::Id(id) => match id {
-                DeviceId::Router(i) => self.routers.get(i).map(|r| r as &dyn Device),
-                DeviceId::Switch(i) => self.switches.get(i).map(|s| s as &dyn Device),
-                DeviceId::Desktop(i) => self.desktops.get(i).map(|d| d as &dyn Device),
+                DeviceId::Router(i) => Some(self.routers[i].attributes.clone()),
+                DeviceId::Switch(i) => Some(self.switches[i].attributes()),
+                DeviceId::Desktop(i) => Some(self.desktops[i].attributes()),
             },
+        }
+    }
+
+    pub fn get_terminal(&mut self, id: DeviceId) -> Vec<String> {
+        match id {
+            DeviceId::Router(i) => self.switches[i].terminal.out_buf.drain(..).collect(),
+            DeviceId::Switch(i) => self.switches[i].terminal.out_buf.drain(..).collect(),
+            DeviceId::Desktop(i) => self.desktops[i].terminal.out_buf.drain(..).collect(),
         }
     }
 
     pub fn set(&mut self, id: DeviceId, query: DeviceSetQuery) {
         match query {
             DeviceSetQuery::Pos(pos) => match id {
-                DeviceId::Router(i) => self.routers[i].pos = pos,
-                DeviceId::Switch(i) => self.switches[i].pos = pos,
-                DeviceId::Desktop(i) => self.desktops[i].pos = pos,
+                DeviceId::Router(i) => self.routers[i].attributes.pos = pos,
+                DeviceId::Switch(i) => self.switches[i].attributes.pos = pos,
+                DeviceId::Desktop(i) => self.desktops[i].attributes.pos = pos,
             },
             DeviceSetQuery::Connect(adj_id, self_port, adj_port) => {
                 self.connect(id, self_port, adj_id, adj_port);
@@ -254,6 +278,17 @@ impl DeviceRepository {
             DeviceSetQuery::Disconnect(port) => {
                 self.disconnect(id, port);
             }
+            DeviceSetQuery::TerminalInput(input) => match id {
+                DeviceId::Router(i) => {
+                    self.routers[i].input(&input);
+                }
+                DeviceId::Switch(i) => {
+                    self.switches[i].input(&input);
+                }
+                DeviceId::Desktop(i) => {
+                    self.desktops[i].input(&input);
+                }
+            },
         }
     }
 
@@ -274,23 +309,23 @@ impl DeviceRepository {
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let d = &mut dr.desktops[d_i];
+            let component = &mut dr.desktops[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
                     EthernetPort::connect(
-                        &mut d.desktop.interface.ethernet.port(),
-                        &mut dr.desktops[other_i].desktop.interface.ethernet.port(),
+                        &mut component.device.interface.ethernet.port(),
+                        &mut dr.desktops[other_i].device.interface.ethernet.port(),
                     );
                 }
                 DeviceId::Switch(_) => {
                     dr.switches[other_i]
-                        .switch
-                        .connect(other_port, &mut d.desktop.interface.ethernet);
+                        .device
+                        .connect(other_port, &mut component.device.interface.ethernet);
                 }
                 DeviceId::Router(_) => {
                     dr.routers[other_i]
-                        .router
-                        .connect(other_port, &mut d.desktop.interface);
+                        .device
+                        .connect(other_port, &mut component.device.interface);
                 }
             }
         }
@@ -303,16 +338,17 @@ impl DeviceRepository {
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let d = &mut dr.switches[d_i];
+            let component = &mut dr.switches[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
-                    d.switch
-                        .connect(port, &mut dr.desktops[other_i].desktop.interface.ethernet);
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface.ethernet);
                 }
                 DeviceId::Switch(_) => {
                     // have to call connect on the switch device so the switch hello bpdu is sent.
                     // compiler gymnastics ensue...
-                    let (d, other_switch) = if d_i < other_i {
+                    let (component, other_component) = if d_i < other_i {
                         let (left, right) = dr.switches.split_at_mut(other_i);
                         (&mut left[d_i], &mut right[0])
                     } else {
@@ -320,13 +356,14 @@ impl DeviceRepository {
                         (&mut right[0], &mut left[other_i])
                     };
 
-                    d.switch
-                        .connect_switch(port, &mut other_switch.switch, other_port);
+                    component
+                        .device
+                        .connect_switch(port, &mut other_component.device, other_port);
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut d.switch.ports()[port],
-                        &mut dr.routers[other_i].router.ports()[other_port],
+                        &mut component.device.ports()[port],
+                        &mut dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
@@ -340,22 +377,23 @@ impl DeviceRepository {
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let d = &mut dr.routers[d_i];
+            let component = &mut dr.routers[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
-                    d.router
-                        .connect(port, &mut dr.desktops[other_i].desktop.interface);
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface);
                 }
                 DeviceId::Switch(_) => {
                     EthernetPort::connect(
-                        &mut d.router.ports()[port],
-                        &mut dr.switches[other_i].switch.ports()[other_port],
+                        &mut component.device.ports()[port],
+                        &mut dr.switches[other_i].device.ports()[other_port],
                     );
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut d.router.ports()[port],
-                        &mut dr.routers[other_i].router.ports()[other_port],
+                        &mut component.device.ports()[port],
+                        &mut dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
@@ -387,13 +425,13 @@ impl DeviceRepository {
         fn _dc(dr: &mut DeviceRepository, id: DeviceId, i: usize, port: usize) {
             match id {
                 DeviceId::Desktop(_) => {
-                    dr.desktops[i].desktop.interface.disconnect();
+                    dr.desktops[i].device.interface.disconnect();
                 }
                 DeviceId::Switch(_) => {
-                    dr.switches[i].switch.disconnect(port);
+                    dr.switches[i].device.disconnect(port);
                 }
                 DeviceId::Router(_) => {
-                    dr.routers[i].router.disconnect(port);
+                    dr.routers[i].device.disconnect(port);
                 }
             }
         }
@@ -425,23 +463,29 @@ impl DeviceRepository {
         // Draw ethernet (adjacencies)
         let mut set: HashSet<DeviceId> = HashSet::new(); // Only need to draw a line once per device
         for (id, adjs) in self.adj_devices.iter() {
-            let dv = self.get(DeviceGetQuery::Id(*id)).unwrap();
+            let c = self.get(DeviceGetQuery::Id(*id)).unwrap();
 
             for (e_port, adj_id, _) in adjs {
                 let target = self.get(DeviceGetQuery::Id(*adj_id)).unwrap();
-                let start_pos = Vector2::new(dv.pos().x, dv.pos().y);
-                let end_pos = Vector2::new(target.pos().x, target.pos().y);
+                let start_pos = Vector2::new(c.pos.x, c.pos.y);
+                let end_pos = Vector2::new(target.pos.x, target.pos.y);
                 if !set.contains(adj_id) {
                     d.draw_line_ex(start_pos, end_pos, 2.5, Color::RAYWHITE);
                 }
                 set.insert(*id);
 
+                let is_port_up = match id {
+                    DeviceId::Switch(i) => self.switches[*i].device.is_port_up(*e_port),
+                    DeviceId::Router(i) => self.routers[*i].device.is_port_up(*e_port),
+                    _ => true,
+                };
+
                 let dir_e = (end_pos - start_pos).normalized();
                 d.draw_circle(
-                    (dv.pos().x + dir_e.x * 35.0) as i32,
-                    (dv.pos().y + dir_e.y * 35.0) as i32,
+                    (c.pos.x + dir_e.x * 35.0) as i32,
+                    (c.pos.y + dir_e.y * 35.0) as i32,
                     5.0,
-                    if dv.is_port_up(*e_port) {
+                    if is_port_up {
                         Color::LIMEGREEN
                     } else {
                         Color::RED
@@ -450,49 +494,50 @@ impl DeviceRepository {
             }
         }
 
-        for router in &mut self.routers {
+        for component in &mut self.routers {
             d.draw_circle(
-                router.pos.x as i32,
-                router.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 ROUTER_DISPLAY_RADIUS + 2.0,
                 Color::WHITE,
             );
 
             d.draw_circle(
-                router.pos.x as i32,
-                router.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 ROUTER_DISPLAY_RADIUS,
                 Color::BLACK,
             );
 
             utils::draw_icon(
                 GuiIconName::ICON_SHUFFLE_FILL,
-                (router.pos.x - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
-                (router.pos.y - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
+                (component.attributes.pos.x - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
+                (component.attributes.pos.y - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
                 2,
                 Color::WHITE,
             );
 
             d.draw_text(
-                router.label.as_str(),
-                router.pos.x as i32 - d.measure_text(&router.label, FONT_SIZE) / 2,
-                (router.pos.y + ROUTER_DISPLAY_RADIUS) as i32 + PADDING,
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32
+                    - d.measure_text(&component.attributes.label, FONT_SIZE) / 2,
+                (component.attributes.pos.y + ROUTER_DISPLAY_RADIUS) as i32 + PADDING,
                 FONT_SIZE,
                 Color::WHITE,
             );
         }
 
-        for switch in &mut self.switches {
+        for component in &mut self.switches {
             d.draw_rectangle(
-                switch.pos.x as i32,
-                switch.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 SWITCH_DISPLAY_LENGTH,
                 SWITCH_DISPLAY_LENGTH,
                 Color::BLACK,
             );
             d.draw_rectangle_lines(
-                switch.pos.x as i32,
-                switch.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 SWITCH_DISPLAY_LENGTH,
                 SWITCH_DISPLAY_LENGTH,
                 Color::WHITE,
@@ -500,25 +545,25 @@ impl DeviceRepository {
 
             utils::draw_icon(
                 GuiIconName::ICON_CURSOR_SCALE_FILL,
-                switch.pos.x as i32 + (SWITCH_DISPLAY_LENGTH / 6),
-                switch.pos.y as i32 + (SWITCH_DISPLAY_LENGTH / 6),
+                component.attributes.pos.x as i32 + (SWITCH_DISPLAY_LENGTH / 6),
+                component.attributes.pos.y as i32 + (SWITCH_DISPLAY_LENGTH / 6),
                 2,
                 Color::WHITE,
             );
 
             d.draw_text(
-                switch.label.as_str(),
-                switch.pos.x as i32,
-                switch.pos.y as i32 + SWITCH_DISPLAY_LENGTH + PADDING,
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32 + SWITCH_DISPLAY_LENGTH + PADDING,
                 FONT_SIZE,
                 Color::WHITE,
             );
         }
 
-        for desktop in &mut self.desktops {
+        for component in &mut self.desktops {
             d.draw_rectangle(
-                desktop.pos.x as i32,
-                desktop.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 DESKTOP_DISPLAY_SIZE,
                 DESKTOP_DISPLAY_SIZE,
                 Color::BLACK,
@@ -526,16 +571,16 @@ impl DeviceRepository {
 
             utils::draw_icon(
                 GuiIconName::ICON_MONITOR,
-                desktop.pos.x as i32,
-                desktop.pos.y as i32,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
                 3,
                 Color::WHITE,
             );
 
             d.draw_text(
-                desktop.label.as_str(),
-                desktop.pos.x as i32,
-                desktop.pos.y as i32 + 5 * PADDING,
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32 + 5 * PADDING,
                 FONT_SIZE,
                 Color::WHITE,
             );
@@ -543,141 +588,19 @@ impl DeviceRepository {
     }
 
     pub fn update(&mut self) {
-        for router in &mut self.routers {
-            router.router.tick();
+        for component in &mut self.routers {
+            component.device.tick();
         }
 
-        for switch in &mut self.switches {
-            switch.switch.tick();
+        for component in &mut self.switches {
+            component.device.tick();
         }
 
-        for desktop in &mut self.desktops {
-            desktop.tick();
+        for componnet in &mut self.desktops {
+            componnet.tick();
         }
 
         self.cable_simulator.tick();
-    }
-}
-
-struct RouterDevice {
-    id: usize,
-    label: String,
-    pos: Vector2,
-    router: Router,
-    terminal: Terminal<Router>,
-}
-
-impl Device for RouterDevice {
-    fn label(&self) -> &str {
-        &self.label
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-    }
-
-    fn id(&self) -> DeviceId {
-        DeviceId::Router(self.id)
-    }
-
-    fn is_port_up(&self, port: usize) -> bool {
-        self.router.is_port_up(port)
-    }
-
-    fn ports_len(&self) -> usize {
-        self.router.ports().len()
-    }
-
-    fn input(&mut self, input: String) {
-        self.terminal.execute(&mut self.router, &input);
-    }
-
-    fn out(&mut self) -> Option<String> {
-        self.terminal.out_buf.pop_front()
-    }
-}
-
-impl RouterDevice {}
-
-struct SwitchDevice {
-    id: usize,
-    label: String,
-    pos: Vector2,
-    switch: Switch,
-    terminal: Terminal<Switch>,
-}
-
-impl Device for SwitchDevice {
-    fn label(&self) -> &str {
-        &self.label
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-            + Vector2::new(
-                SWITCH_DISPLAY_LENGTH as f32 / 2.0,
-                SWITCH_DISPLAY_LENGTH as f32 / 2.0,
-            )
-    }
-
-    fn id(&self) -> DeviceId {
-        DeviceId::Switch(self.id)
-    }
-
-    fn is_port_up(&self, port: usize) -> bool {
-        self.switch.is_port_up(port)
-    }
-
-    fn ports_len(&self) -> usize {
-        self.switch.ports().len()
-    }
-
-    fn input(&mut self, input: String) {
-        self.terminal.execute(&mut self.switch, &input);
-    }
-
-    fn out(&mut self) -> Option<String> {
-        self.terminal.out_buf.pop_front()
-    }
-}
-struct DesktopDevice {
-    id: usize,
-    label: String,
-    pos: Vector2,
-    desktop: Desktop,
-    terminal: Terminal<Desktop>,
-}
-
-impl Device for DesktopDevice {
-    fn label(&self) -> &str {
-        &self.label
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-            + Vector2::new(
-                DESKTOP_DISPLAY_SIZE as f32 / 2.0,
-                DESKTOP_DISPLAY_SIZE as f32 / 2.0,
-            )
-    }
-
-    fn id(&self) -> DeviceId {
-        DeviceId::Desktop(self.id)
-    }
-
-    fn input(&mut self, input: String) {
-        self.terminal.execute(&mut self.desktop, &input);
-    }
-
-    fn out(&mut self) -> Option<String> {
-        self.terminal.out_buf.pop_front()
-    }
-}
-
-impl Tickable for DesktopDevice {
-    fn tick(&mut self) {
-        self.terminal.tick(&mut self.desktop);
-        self.desktop.tick();
     }
 }
 
