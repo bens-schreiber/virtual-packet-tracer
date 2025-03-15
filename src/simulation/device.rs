@@ -3,13 +3,17 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use raylib::prelude::*;
 
 use crate::{
-    network::device::{
-        cable::{CableSimulator, EthernetPort},
-        desktop::Desktop,
-        router::Router,
-        switch::Switch,
+    network::{
+        device::{
+            cable::{CableSimulator, EthernetPort},
+            desktop::Desktop,
+            router::Router,
+            switch::Switch,
+        },
+        ethernet::ByteSerializable,
+        ipv4::{IcmpFrame, IcmpType},
     },
-    tick::Tickable,
+    tick::{TickTimer, Tickable},
 };
 
 use super::utils;
@@ -101,13 +105,16 @@ impl DeviceRepository {
                     self.label_seeds.0 += 1;
                     self.label_seeds.0
                 };
-                self.routers.push(RouterDevice {
+                let rd = RouterDevice {
                     id: self.routers.len(),
                     label: format!("Router {}", label),
                     pos,
                     router: Router::from_seed(self.mac_seed),
                     terminal: Terminal::<Router>::new_router(),
-                });
+                };
+                self.cable_simulator.adds(rd.router.ports());
+                self.routers.push(rd);
+
                 self.mac_seed += 8;
             }
             DeviceKind::Switch => {
@@ -115,13 +122,16 @@ impl DeviceRepository {
                     self.label_seeds.1 += 1;
                     self.label_seeds.1
                 };
-                self.switches.push(SwitchDevice {
+                let sw = SwitchDevice {
                     id: self.switches.len(),
                     label: format!("Switch {}", label),
                     pos,
                     switch: Switch::from_seed(self.mac_seed, label as u16),
                     terminal: Terminal::<Switch>::new_switch(),
-                });
+                };
+                self.cable_simulator.adds(sw.switch.ports());
+                self.switches.push(sw);
+
                 self.mac_seed += 32;
             }
             DeviceKind::Desktop => {
@@ -129,13 +139,17 @@ impl DeviceRepository {
                     self.label_seeds.2 += 1;
                     self.label_seeds.2
                 };
-                self.desktops.push(DesktopDevice {
+                let dt = DesktopDevice {
                     id: self.desktops.len(),
                     label: format!("Desktop {}", label),
                     pos,
                     desktop: Desktop::from_seed(self.mac_seed),
                     terminal: Terminal::<Desktop>::new_desktop(),
-                });
+                };
+                self.cable_simulator
+                    .add(dt.desktop.interface.ethernet.port());
+                self.desktops.push(dt);
+
                 self.mac_seed += 1;
             }
         }
@@ -538,7 +552,7 @@ impl DeviceRepository {
         }
 
         for desktop in &mut self.desktops {
-            desktop.desktop.tick();
+            desktop.tick();
         }
 
         self.cable_simulator.tick();
@@ -660,10 +674,19 @@ impl Device for DesktopDevice {
     }
 }
 
+impl Tickable for DesktopDevice {
+    fn tick(&mut self) {
+        self.terminal.tick(&mut self.desktop);
+        self.desktop.tick();
+    }
+}
+
 type CommandFunction<T> = fn(&mut Terminal<T>, &mut T, &[&str]) -> ();
 struct Terminal<T> {
     out_buf: VecDeque<String>,
     dict: HashMap<String, (CommandFunction<T>, String)>,
+    awaiting_command: Option<String>,
+    timer: TickTimer<String>,
 }
 
 impl<T> Terminal<T> {
@@ -690,6 +713,8 @@ impl<T> Terminal<T> {
         Self {
             out_buf: VecDeque::new(),
             dict,
+            awaiting_command: None,
+            timer: TickTimer::default(),
         }
     }
 
@@ -962,6 +987,14 @@ impl Terminal<Desktop> {
             ),
         );
 
+        term.dict.insert(
+            "ping".to_string(),
+            (
+                Self::ping as CommandFunction<Desktop>,
+                "Ping an IP address. Usage: ping <ipv4 addr>".to_string(),
+            ),
+        );
+
         term
     }
 
@@ -1048,6 +1081,80 @@ impl Terminal<Desktop> {
         for (ip, mac) in desktop.interface.arp_table().iter() {
             term.out_buf
                 .push_back(format!("{} -> {}", ipv4_fmt!(ip), mac_fmt!(mac)));
+        }
+    }
+
+    fn ping(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf
+                .push_back("Usage: ping <ipv4 addr>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        match desktop
+            .interface
+            .send_icmp(ip.octets(), IcmpType::EchoRequest)
+        {
+            Ok(_) => {
+                term.out_buf.push_back(format!("Pinging {}...", ip));
+                term.awaiting_command = Some("ping".to_string());
+                term.timer.schedule("ping".to_string(), 3, false);
+            }
+            Err(e) => {
+                term.out_buf.push_back(format!("Error: {}", e));
+            }
+        };
+    }
+
+    fn tick(&mut self, desktop: &mut Desktop) {
+        if self.awaiting_command.is_none() {
+            self.timer.tick();
+            return;
+        }
+
+        for event in self.timer.ready() {
+            self.out_buf.push_back(format!("'{}' timed out.", event));
+            self.awaiting_command = None;
+        }
+
+        self.timer.tick();
+
+        match self.awaiting_command.as_deref() {
+            Some("ping") => {
+                // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
+                for frame in desktop.interface.receive() {
+                    if frame.destination != desktop.interface.ip_address {
+                        continue;
+                    }
+
+                    if frame.protocol == 1 {
+                        let icmp = match IcmpFrame::from_bytes(frame.data) {
+                            Ok(icmp) => icmp,
+                            Err(_) => {
+                                continue;
+                            }
+                        };
+
+                        if icmp.icmp_type == IcmpType::EchoReply as u8 {
+                            self.out_buf.push_back(String::from("Pong!"));
+                            self.awaiting_command = None;
+                            return;
+                        }
+                    } else {
+                        desktop.received.push(frame);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
