@@ -6,6 +6,11 @@ use raylib::prelude::*;
 
 mod utils;
 
+// todo: bpdu in gui
+// todo: time in gui
+// todo: when paused, make next button blink
+// todo: ping should stop terminal from taking input
+
 pub fn run() {
     let (mut rl, thread) = raylib::init()
         .resizable()

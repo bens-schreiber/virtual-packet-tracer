@@ -8,7 +8,7 @@ use raylib::prelude::*;
 use crate::{
     ipv4_fmt, mac_fmt,
     network::{
-        device::router::RipFrame,
+        device::{router::RipFrame, switch::BpduFrame},
         ethernet::{ByteSerializable, Ethernet2Frame, Ethernet802_3Frame},
         ipv4::{ArpFrame, IcmpFrame, Ipv4Frame},
     },
@@ -878,7 +878,7 @@ impl Gui {
             *y += FONT_SIZE;
 
             d.draw_text(
-                &format!("Length: {}", eth.length),
+                &format!("Length: 0x{:X}", eth.length),
                 x,
                 *y,
                 FONT_SIZE,
@@ -951,7 +951,7 @@ impl Gui {
             *y += FONT_SIZE;
 
             d.draw_text(
-                &format!("Protocol: {:?}", ipv4.protocol),
+                &format!("Protocol: 0x{:X}", ipv4.protocol),
                 x,
                 *y,
                 FONT_SIZE,
@@ -1043,6 +1043,58 @@ impl Gui {
                 }
                 PacketKind::Bpdu(eth) => {
                     display_eth802_3_info(&mut y, x, eth, d);
+
+                    y += (1.5 * PADDING as f32) as i32;
+
+                    let bpdu_frame = BpduFrame::from_bytes(eth.data.clone()).unwrap();
+                    d.draw_text("BPDU", x, y, FONT_SIZE, Color::WHITE);
+                    d.draw_line(
+                        x,
+                        y + FONT_SIZE,
+                        x + d.measure_text("BPDU", FONT_SIZE),
+                        y + FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE + PADDING / 2;
+
+                    d.draw_text(
+                        &format!("Root Bridge ID: 0x{:X}", bpdu_frame.root_bid),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Root Cost: 0x{:X}", bpdu_frame.root_cost),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Flags: 0x{:X}", bpdu_frame.flags),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Port ID: {}", bpdu_frame.port),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
                 }
                 PacketKind::Rip(eth) => {
                     display_eth2_info(&mut y, x, eth, d);
@@ -1069,7 +1121,7 @@ impl Gui {
                     y += FONT_SIZE + PADDING / 2;
 
                     d.draw_text(
-                        &format!("Command: {:?}", rip_frame.command),
+                        &format!("Command: 0x{:X}", rip_frame.command),
                         x,
                         y,
                         FONT_SIZE,
