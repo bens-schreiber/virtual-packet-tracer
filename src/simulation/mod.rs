@@ -12,12 +12,13 @@ todo:
 - make connections detachable                                                            done
 - add packet tracing for all packets                                                     done
 - add packet full detail view                                                            done
-- add packet tracer mode
+- add packet tracer mode                                                                 done
 - fix place in buttons bug
 - tooltip for buttons
 - key shortcut for buttons
 - terminal messages dynamic height cap
-- dont allow drag in gui
+- gui rendering order
+- delete bug
 */
 
 pub fn run() {

@@ -26,10 +26,31 @@ use super::{
 
 #[derive(Clone)]
 struct Packet {
+    animating: bool,
+    pos: Vector2,
     last: Option<DeviceId>,
     current: DeviceId,
     kind: PacketKind,
     time: SystemTime,
+}
+
+impl Packet {
+    fn new(
+        pos: Vector2,
+        last: Option<DeviceId>,
+        current: DeviceId,
+        kind: PacketKind,
+        time: SystemTime,
+    ) -> Self {
+        Self {
+            animating: true,
+            pos,
+            last,
+            current,
+            kind,
+            time,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -138,6 +159,35 @@ impl Gui {
         let (screen_width, screen_height) = (d.get_screen_width(), d.get_screen_height());
         let mouse_pos = d.get_mouse_position();
         self.gui_bounds.clear();
+
+        // Packet Tracer Mode Draw Packets
+        // -----------------------------------
+        if self.tracer_enabled {
+            for packet in self.packet_buffer.iter() {
+                if !packet.animating {
+                    continue;
+                }
+
+                // draw a dark red square with the packet kind in text under the square
+                let (title, color) = match packet.kind {
+                    PacketKind::Arp(_) => ("ARP", Color::DARKRED),
+                    PacketKind::Bpdu(_) => ("BPDU", Color::DARKBLUE),
+                    PacketKind::Rip(_) => ("RIP", Color::DARKGREEN),
+                    PacketKind::Icmp(_) => ("ICMP", Color::DARKPURPLE),
+                };
+
+                d.draw_rectangle(packet.pos.x as i32, packet.pos.y as i32, 20, 20, color);
+
+                d.draw_text(
+                    title,
+                    packet.pos.x as i32 + d.measure_text(title, FONT_SIZE) / 2,
+                    packet.pos.y as i32 + 2 * FONT_SIZE,
+                    FONT_SIZE,
+                    Color::WHITE,
+                );
+            }
+        }
+        // -----------------------------------
 
         // Ethernet Connection Mode Line Drawing
         // -----------------------------------
@@ -568,26 +618,26 @@ impl Gui {
                 };
 
                 for packet in incoming_packets {
-                    let packet = Packet {
-                        last: incoming_device_id,
-                        current: id,
-                        kind: packet,
+                    self.packet_buffer.push_back(Packet::new(
+                        incoming_device_id.map_or(Vector2::new(0.0, 0.0), |id| {
+                            dr.get(DeviceGetQuery::Id(id)).unwrap().pos
+                        }),
+                        incoming_device_id,
+                        id,
+                        packet,
                         time,
-                    };
-
-                    self.packet_buffer.push_back(packet);
+                    ));
                 }
 
                 for packet in outgoing_packets {
-                    if let Some(outgoing_device_id) = outgoing_device_id {
-                        let packet = Packet {
-                            last: None,
-                            current: id,
-                            kind: packet,
+                    if let Some(_) = outgoing_device_id {
+                        self.packet_buffer.push_back(Packet::new(
+                            dr.get(DeviceGetQuery::Id(id)).unwrap().pos,
+                            None,
+                            id,
+                            packet,
                             time,
-                        };
-
-                        self.packet_buffer.push_back(packet);
+                        ));
                     }
                 }
             }
@@ -1034,6 +1084,27 @@ impl Gui {
         let is_left_mouse_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         let is_right_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
 
+        // Packet Tracer Enabled
+        // -----------------------------------
+        if self.tracer_enabled {
+            for packet in self.packet_buffer.iter_mut() {
+                if !packet.animating {
+                    continue;
+                }
+
+                let da = dr.get(DeviceGetQuery::Id(packet.current)).unwrap();
+                let pos = da.pos;
+                if packet.pos.distance_to(pos) < 1.0 {
+                    continue;
+                }
+                packet.pos = Vector2::new(
+                    packet.pos.x + (pos.x - packet.pos.x) * 0.1,
+                    packet.pos.y + (pos.y - packet.pos.y) * 0.1,
+                );
+            }
+        }
+        // -----------------------------------
+
         // Edit Dropdown
         // -----------------------------------
         if is_right_mouse_clicked {
@@ -1145,6 +1216,9 @@ impl Gui {
                     tp.advance(Duration::from_millis(1));
                     self.tracer_next = true;
                     self.reset_states();
+                    for packet in self.packet_buffer.iter_mut() {
+                        packet.animating = false;
+                    }
                 }
                 _ => {}
             }
