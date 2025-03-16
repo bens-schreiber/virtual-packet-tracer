@@ -676,7 +676,7 @@ impl Gui {
                 }
 
                 for packet in outgoing_packets {
-                    if let Some(_) = outgoing_device_id {
+                    if outgoing_device_id.is_some() {
                         self.packet_buffer.push_back(Packet::new(
                             dr.get(DeviceGetQuery::Id(id))
                                 .map_or(Vector2::new(0.0, 0.0), |device| device.pos),

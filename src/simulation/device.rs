@@ -534,7 +534,7 @@ impl DeviceRepository {
                     .and_then(|adjs| {
                         adjs.iter()
                             .find(|(p, _, _)| *p == i)
-                            .map(|(_, adj, _)| adj.clone())
+                            .map(|(_, adj, _)| *adj)
                     });
                 values.push((
                     component.attributes.id,
@@ -562,7 +562,7 @@ impl DeviceRepository {
                     .and_then(|adjs| {
                         adjs.iter()
                             .find(|(p, _, _)| *p == i)
-                            .map(|(_, adj, _)| adj.clone())
+                            .map(|(_, adj, _)| *adj)
                     });
                 values.push((
                     component.attributes.id,
@@ -585,7 +585,7 @@ impl DeviceRepository {
             let adj = self
                 .adj_devices
                 .get(&component.attributes.id)
-                .and_then(|adjs| adjs.get(0).map(|(_, adj, _)| adj.clone()));
+                .and_then(|adjs| adjs.first().map(|(_, adj, _)| *adj));
 
             values.push((
                 component.attributes.id,
