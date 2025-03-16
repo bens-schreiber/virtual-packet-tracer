@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use raylib::prelude::*;
@@ -112,6 +112,7 @@ pub struct Gui {
 
     pub tracer_enabled: bool,
     pub tracer_next: bool,
+    tracer_blink: u8,
 }
 
 impl Default for Gui {
@@ -134,6 +135,7 @@ impl Default for Gui {
             packet_selected: None,
             tracer_enabled: false,
             tracer_next: false,
+            tracer_blink: 0,
         }
     }
 }
@@ -147,6 +149,7 @@ impl Gui {
         self.selection = None;
         self.ethernet_dropdown = None;
         self.edit_dropdown = None;
+        self.tracer_blink = 0;
     }
 
     pub fn render(&mut self, d: &mut RaylibDrawHandle, dr: &mut DeviceRepository) {
@@ -218,9 +221,12 @@ impl Gui {
         if let Some(mut dropdown) = self.edit_dropdown {
             if let Some(da) = dr.get(DeviceGetQuery::Id(dropdown.device)) {
                 let pos = da.pos;
-
-                let options = ["Terminal", "Delete; Disconnect"];
-                let height = 10 * FONT_SIZE;
+                let options = if self.tracer_enabled {
+                    "Terminal;Disconnect"
+                } else {
+                    "Terminal;Disconnect;Delete"
+                };
+                let height = options.split(';').count() as i32 * 3 * FONT_SIZE;
                 let bounds = Rectangle::new(
                     pos.x + PADDING as f32,
                     pos.y + PADDING as f32,
@@ -231,7 +237,7 @@ impl Gui {
 
                 d.gui_list_view(
                     bounds,
-                    Some(utils::rstr_from_string(options.join(";")).as_c_str()),
+                    Some(utils::rstr_from_string(options.to_string()).as_c_str()),
                     &mut dropdown.scroll_index,
                     &mut dropdown.value,
                 );
@@ -244,14 +250,14 @@ impl Gui {
                         self.reset_states();
                     }
                     1 => {
-                        dr.set(dropdown.device, DeviceSetQuery::Delete);
-                        self.reset_states();
-                    }
-                    2 => {
                         self.reset_states();
                         self.ethernet_dropdown = Some(Dropdown::new(dropdown.device));
                         self.mode = Some(GuiMode::EthernetDisconnect);
                         self.gui_consume_this_click = false;
+                    }
+                    2 => {
+                        dr.set(dropdown.device, DeviceSetQuery::Delete);
+                        self.reset_states();
                     }
                     _ => {
                         self.edit_dropdown = Some(dropdown);
@@ -478,6 +484,22 @@ impl Gui {
                 Color::WHITE,
             );
         }
+
+        // Draw a fading blinking effect on the next button border with self.tracer_next_blink
+        if self.tracer_enabled {
+            d.draw_rectangle_lines_ex(
+                Rectangle::new(
+                    (screen_width - PADDING) as f32 - box_width as f32,
+                    PADDING as f32,
+                    box_width as f32,
+                    box_height as f32,
+                ),
+                2.0,
+                Color::RED.alpha(self.tracer_blink as f32 / 255.0),
+            );
+            self.tracer_blink = self.tracer_blink.wrapping_sub(5);
+        }
+
         // -----------------------------------
 
         let bottom_panel_bounds = Rectangle::new(
@@ -616,7 +638,7 @@ impl Gui {
             }
 
             // Output
-            self.terminal_out.extend(dr.get_terminal_out(da.id));
+            self.terminal_out.extend(dr.get_terminal_output(da.id));
 
             let mut out_y = terminal_text_start_y;
             for line in self
@@ -665,11 +687,17 @@ impl Gui {
                 };
 
                 for packet in incoming_packets {
-                    self.packet_buffer.push_back(Packet::new(
+                    let incoming_id = if packet.loopback() {
+                        Some(id)
+                    } else {
                         incoming_device_id
+                    };
+
+                    self.packet_buffer.push_back(Packet::new(
+                        incoming_id
                             .and_then(|id| dr.get(DeviceGetQuery::Id(id)).map(|device| device.pos))
                             .unwrap_or(Vector2::new(0.0, 0.0)),
-                        incoming_device_id,
+                        incoming_id,
                         id,
                         packet,
                         time,
@@ -730,6 +758,14 @@ impl Gui {
 
         let mut y = table_bounds.y + 4.0 * FONT_SIZE as f32;
         for packet in self.packet_buffer.iter().rev() {
+            let time = (packet
+                .time
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+                % 1_000_000)
+                .to_string();
+
             let last_device = packet.last.map_or("-----".to_string(), |id| {
                 dr.get(DeviceGetQuery::Id(id))
                     .map_or("Unknown".to_string(), |device| device.label.clone())
@@ -749,7 +785,7 @@ impl Gui {
 
             let mut bounds = Rectangle::new(table_bounds.x + 10.0, y, col_width, FONT_SIZE as f32);
 
-            label_clicked |= d.gui_label_button(bounds, Some(rstr!("0")));
+            label_clicked |= d.gui_label_button(bounds, Some(rstr_from_string(time).as_c_str()));
             bounds.x += col_width;
 
             label_clicked |=

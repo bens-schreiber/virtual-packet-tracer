@@ -5,9 +5,12 @@ use raylib::{
     ffi::{self, GuiIconName},
 };
 
-use crate::network::{
-    ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame},
-    ipv4::Ipv4Frame,
+use crate::{
+    is_mac_multicast_or_broadcast,
+    network::{
+        ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, MacAddress},
+        ipv4::Ipv4Frame,
+    },
 };
 
 #[macro_export]
@@ -65,6 +68,17 @@ pub enum PacketKind {
 }
 
 impl PacketKind {
+    pub fn loopback(&self) -> bool {
+        let (source, dest) = match self {
+            PacketKind::Arp(frame) => (frame.source_address, frame.destination_address),
+            PacketKind::Bpdu(frame) => (frame.source_address, frame.destination_address),
+            PacketKind::Rip(frame) => (frame.source_address, frame.destination_address),
+            PacketKind::Icmp(frame) => (frame.source_address, frame.destination_address),
+        };
+
+        !is_mac_multicast_or_broadcast!(source) && source == dest
+    }
+
     // TODO: assumes the packet is something we can handle. Currently, there is no "custom" sending of frames, so
     // there is no need to handle unknown frames. This will need to be updated if some kind of custom frame sending is added.
     pub fn from_bytes(packet: &[u8]) -> PacketKind {

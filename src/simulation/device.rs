@@ -260,7 +260,7 @@ impl DeviceRepository {
         }
     }
 
-    pub fn get_terminal_out(&mut self, id: DeviceId) -> Vec<String> {
+    pub fn get_terminal_output(&mut self, id: DeviceId) -> Vec<String> {
         let i = self.lookup(id);
         let out_buf = match id {
             DeviceId::Router(_) => &mut self.routers[i].terminal.out_buf,
