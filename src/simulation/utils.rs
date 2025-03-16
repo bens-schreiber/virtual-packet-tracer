@@ -6,9 +6,26 @@ use raylib::{
 };
 
 use crate::network::{
-    ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, MacAddress},
+    ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame},
     ipv4::Ipv4Frame,
 };
+
+#[macro_export]
+macro_rules! ipv4_fmt {
+    ($ip:expr) => {
+        format!("{}.{}.{}.{}", $ip[0], $ip[1], $ip[2], $ip[3])
+    };
+}
+
+#[macro_export]
+macro_rules! mac_fmt {
+    ($mac:expr) => {
+        format!(
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            $mac[0], $mac[1], $mac[2], $mac[3], $mac[4], $mac[5]
+        )
+    };
+}
 
 pub fn draw_icon(icon: GuiIconName, pos_x: i32, pos_y: i32, pixel_size: i32, color: Color) {
     unsafe {
@@ -39,6 +56,7 @@ pub fn array_to_string(array: &[u8]) -> String {
     String::from_utf8_lossy(slice).to_string()
 }
 
+#[derive(Clone)]
 pub enum PacketKind {
     Arp(Ethernet2Frame),
     Bpdu(Ethernet802_3Frame),
@@ -47,15 +65,6 @@ pub enum PacketKind {
 }
 
 impl PacketKind {
-    pub fn source_mac(&self) -> MacAddress {
-        match self {
-            PacketKind::Arp(frame) => frame.source_address,
-            PacketKind::Bpdu(frame) => frame.source_address,
-            PacketKind::Rip(frame) => frame.source_address,
-            PacketKind::Icmp(frame) => frame.source_address,
-        }
-    }
-
     // TODO: assumes the packet is something we can handle. Currently, there is no "custom" sending of frames, so
     // there is no need to handle unknown frames. This will need to be updated if some kind of custom frame sending is added.
     pub fn from_bytes(packet: &Vec<u8>) -> PacketKind {

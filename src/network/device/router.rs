@@ -341,7 +341,7 @@ impl Tickable for Router {
     }
 }
 
-struct RipRoute {
+pub struct RipRoute {
     address_family: u16, // 0x0002
     route_tag: u16,      // 0x0000
     ip_address: Ipv4Address,
@@ -368,8 +368,8 @@ impl RipRoute {
     }
 }
 
-struct RipFrame {
-    command: u8, // 1 = Request, 2 = Response
+pub struct RipFrame {
+    pub command: u8, // 1 = Request, 2 = Response
     version: u8,
     routes: Vec<RipRoute>,
 }

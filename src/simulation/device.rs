@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use raylib::prelude::*;
 
 use crate::{
+    ipv4_fmt, mac_fmt,
     network::{
         device::{
             cable::{CableSimulator, EthernetPort},
@@ -16,6 +17,8 @@ use crate::{
     simulation::utils,
     tick::{TickTimer, Tickable},
 };
+
+use super::utils::PacketKind;
 
 const ROUTER_DISPLAY_RADIUS: f32 = 25.0;
 const SWITCH_DISPLAY_LENGTH: i32 = 45;
@@ -138,7 +141,7 @@ pub struct DeviceRepository {
 
     adj_devices: HashMap<DeviceId, Vec<(usize, DeviceId, usize)>>, // Id -> (Self Port, Adjacent Id, Adjacent Port)
 
-    cable_simulator: CableSimulator,
+    pub cable_simulator: CableSimulator,
     mac_seed: u64,
 }
 
@@ -158,10 +161,6 @@ impl Default for DeviceRepository {
 }
 
 impl DeviceRepository {
-    fn lookup(&self, id: DeviceId) -> usize {
-        *self.lookup.get(&id.as_u64()).expect("Bad lookup")
-    }
-
     pub fn add(&mut self, kind: DeviceKind, pos: Vector2) {
         self.mac_seed += 1;
         match kind {
@@ -307,172 +306,6 @@ impl DeviceRepository {
                 DeviceId::Switch(_) => self.switches[i].attributes.deleted = true,
                 DeviceId::Desktop(_) => self.desktops[i].attributes.deleted = true,
             },
-        }
-    }
-
-    fn connect(&mut self, d1: DeviceId, p1: usize, d2: DeviceId, p2: usize) {
-        if d1 == d2 {
-            return;
-        }
-
-        self.disconnect(d1, p1);
-        self.disconnect(d2, p2);
-
-        let (d1_i, d2_i) = (self.lookup(d1), self.lookup(d2));
-
-        fn connect_desktop(
-            dr: &mut DeviceRepository,
-            d_i: usize,
-            other_port: usize,
-            other_id: DeviceId,
-            other_i: usize,
-        ) {
-            let component = &mut dr.desktops[d_i];
-            match other_id {
-                DeviceId::Desktop(_) => {
-                    EthernetPort::connect(
-                        &mut component.device.interface.ethernet.port(),
-                        &mut dr.desktops[other_i].device.interface.ethernet.port(),
-                    );
-                }
-                DeviceId::Switch(_) => {
-                    dr.switches[other_i]
-                        .device
-                        .connect(other_port, &mut component.device.interface.ethernet);
-                }
-                DeviceId::Router(_) => {
-                    dr.routers[other_i]
-                        .device
-                        .connect(other_port, &mut component.device.interface);
-                }
-            }
-        }
-
-        fn connect_switch(
-            dr: &mut DeviceRepository,
-            d_i: usize,
-            port: usize,
-            other_port: usize,
-            other_id: DeviceId,
-            other_i: usize,
-        ) {
-            let component = &mut dr.switches[d_i];
-            match other_id {
-                DeviceId::Desktop(_) => {
-                    component
-                        .device
-                        .connect(port, &mut dr.desktops[other_i].device.interface.ethernet);
-                }
-                DeviceId::Switch(_) => {
-                    // have to call connect on the switch device so the switch hello bpdu is sent.
-                    // compiler gymnastics ensue...
-                    let (component, other_component) = if d_i < other_i {
-                        let (left, right) = dr.switches.split_at_mut(other_i);
-                        (&mut left[d_i], &mut right[0])
-                    } else {
-                        let (left, right) = dr.switches.split_at_mut(d_i);
-                        (&mut right[0], &mut left[other_i])
-                    };
-
-                    component
-                        .device
-                        .connect_switch(port, &mut other_component.device, other_port);
-                }
-                DeviceId::Router(_) => {
-                    EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.routers[other_i].device.ports()[other_port],
-                    );
-                }
-            }
-        }
-
-        fn connect_router(
-            dr: &mut DeviceRepository,
-            d_i: usize,
-            port: usize,
-            other_port: usize,
-            other_id: DeviceId,
-            other_i: usize,
-        ) {
-            let component = &mut dr.routers[d_i];
-            match other_id {
-                DeviceId::Desktop(_) => {
-                    component
-                        .device
-                        .connect(port, &mut dr.desktops[other_i].device.interface);
-                }
-                DeviceId::Switch(_) => {
-                    EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.switches[other_i].device.ports()[other_port],
-                    );
-                }
-                DeviceId::Router(_) => {
-                    EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.routers[other_i].device.ports()[other_port],
-                    );
-                }
-            }
-        }
-
-        match d1 {
-            DeviceId::Desktop(_) => {
-                connect_desktop(self, d1_i, p2, d2, d2_i);
-            }
-            DeviceId::Switch(_) => {
-                connect_switch(self, d1_i, p1, p2, d2, d2_i);
-            }
-            DeviceId::Router(_) => {
-                connect_router(self, d1_i, p1, p2, d2, d2_i);
-            }
-        }
-
-        self.adj_devices
-            .entry(d1)
-            .or_insert(Vec::new())
-            .push((p1, d2, p2));
-        self.adj_devices
-            .entry(d2)
-            .or_insert(Vec::new())
-            .push((p2, d1, p1));
-    }
-
-    fn disconnect(&mut self, id: DeviceId, port: usize) {
-        fn _dc(dr: &mut DeviceRepository, id: DeviceId, i: usize, port: usize) {
-            match id {
-                DeviceId::Desktop(_) => {
-                    dr.desktops[i].device.interface.disconnect();
-                }
-                DeviceId::Switch(_) => {
-                    dr.switches[i].device.disconnect(port);
-                }
-                DeviceId::Router(_) => {
-                    dr.routers[i].device.disconnect(port);
-                }
-            }
-        }
-
-        let d1_id = id;
-        let d1_adjacency = {
-            let adj_list = self.adj_devices.get(&d1_id);
-            adj_list.and_then(|adj| adj.iter().find(|(p, _, _)| *p == port).cloned())
-        };
-
-        if let Some((d1_port, d2_id, d2_port)) = d1_adjacency {
-            if let Some(adj) = self.adj_devices.get_mut(&d1_id) {
-                adj.retain(|(p, _, _)| *p != d1_port);
-            }
-            if let Some(adj) = self.adj_devices.get_mut(&d2_id) {
-                adj.retain(|(p, _, _)| *p != d2_port);
-            }
-
-            let (d1_i, d2_i) = (self.lookup(d1_id), self.lookup(d2_id));
-
-            _dc(self, d1_id, d1_i, d1_port);
-            _dc(self, d2_id, d2_i, d2_port);
-            return;
         }
     }
 
@@ -684,6 +517,267 @@ impl DeviceRepository {
 
         self.cable_simulator.tick();
     }
+
+    pub fn sniff(
+        &self,
+    ) -> Vec<(
+        DeviceId,
+        (
+            (Option<DeviceId>, Vec<PacketKind>),
+            (Option<DeviceId>, Vec<PacketKind>),
+        ),
+    )> {
+        let mut values = Vec::new();
+        for component in &self.routers {
+            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
+                for (i, port) in component.device.ports().iter().enumerate() {
+                    let (incoming, outgoing) = port.borrow().sniff();
+                    if incoming.is_empty() && outgoing.is_empty() {
+                        continue;
+                    }
+
+                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    );
+
+                    adjs.iter().find(|(p, _, _)| *p == i).map(|(_, adj, _)| {
+                        values.push((
+                            component.attributes.id,
+                            (
+                                (Some(*adj), incoming_packet_kinds),
+                                (Some(*adj), outgoing_packet_kinds),
+                            ),
+                        ));
+                    });
+                }
+            }
+        }
+
+        for component in &self.switches {
+            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
+                for (i, port) in component.device.ports().iter().enumerate() {
+                    let (incoming, outgoing) = port.borrow().sniff();
+
+                    if incoming.is_empty() && outgoing.is_empty() {
+                        continue;
+                    }
+
+                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    );
+
+                    adjs.iter().find(|(p, _, _)| *p == i).map(|(_, adj, _)| {
+                        values.push((
+                            component.attributes.id,
+                            (
+                                (Some(*adj), incoming_packet_kinds),
+                                (Some(*adj), outgoing_packet_kinds),
+                            ),
+                        ));
+                    });
+                }
+            }
+        }
+
+        for component in &self.desktops {
+            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
+                if let Some(adj) = adjs.first() {
+                    let (incoming, outgoing) =
+                        component.device.interface.ethernet.port().borrow().sniff();
+                    if incoming.is_empty() && outgoing.is_empty() {
+                        continue;
+                    }
+
+                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    );
+
+                    values.push((
+                        component.attributes.id,
+                        (
+                            (Some(adj.1), incoming_packet_kinds),
+                            (Some(adj.1), outgoing_packet_kinds),
+                        ),
+                    ));
+                }
+            }
+        }
+
+        values
+    }
+
+    fn lookup(&self, id: DeviceId) -> usize {
+        *self.lookup.get(&id.as_u64()).expect("Bad lookup")
+    }
+
+    fn connect(&mut self, d1: DeviceId, p1: usize, d2: DeviceId, p2: usize) {
+        if d1 == d2 {
+            return;
+        }
+
+        self.disconnect(d1, p1);
+        self.disconnect(d2, p2);
+
+        let (d1_i, d2_i) = (self.lookup(d1), self.lookup(d2));
+
+        fn connect_desktop(
+            dr: &mut DeviceRepository,
+            d_i: usize,
+            other_port: usize,
+            other_id: DeviceId,
+            other_i: usize,
+        ) {
+            let component = &mut dr.desktops[d_i];
+            match other_id {
+                DeviceId::Desktop(_) => {
+                    EthernetPort::connect(
+                        &mut component.device.interface.ethernet.port(),
+                        &mut dr.desktops[other_i].device.interface.ethernet.port(),
+                    );
+                }
+                DeviceId::Switch(_) => {
+                    dr.switches[other_i]
+                        .device
+                        .connect(other_port, &mut component.device.interface.ethernet);
+                }
+                DeviceId::Router(_) => {
+                    dr.routers[other_i]
+                        .device
+                        .connect(other_port, &mut component.device.interface);
+                }
+            }
+        }
+
+        fn connect_switch(
+            dr: &mut DeviceRepository,
+            d_i: usize,
+            port: usize,
+            other_port: usize,
+            other_id: DeviceId,
+            other_i: usize,
+        ) {
+            let component = &mut dr.switches[d_i];
+            match other_id {
+                DeviceId::Desktop(_) => {
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface.ethernet);
+                }
+                DeviceId::Switch(_) => {
+                    // have to call connect on the switch device so the switch hello bpdu is sent.
+                    // compiler gymnastics ensue...
+                    let (component, other_component) = if d_i < other_i {
+                        let (left, right) = dr.switches.split_at_mut(other_i);
+                        (&mut left[d_i], &mut right[0])
+                    } else {
+                        let (left, right) = dr.switches.split_at_mut(d_i);
+                        (&mut right[0], &mut left[other_i])
+                    };
+
+                    component
+                        .device
+                        .connect_switch(port, &mut other_component.device, other_port);
+                }
+                DeviceId::Router(_) => {
+                    EthernetPort::connect(
+                        &mut component.device.ports()[port],
+                        &mut dr.routers[other_i].device.ports()[other_port],
+                    );
+                }
+            }
+        }
+
+        fn connect_router(
+            dr: &mut DeviceRepository,
+            d_i: usize,
+            port: usize,
+            other_port: usize,
+            other_id: DeviceId,
+            other_i: usize,
+        ) {
+            let component = &mut dr.routers[d_i];
+            match other_id {
+                DeviceId::Desktop(_) => {
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface);
+                }
+                DeviceId::Switch(_) => {
+                    EthernetPort::connect(
+                        &mut component.device.ports()[port],
+                        &mut dr.switches[other_i].device.ports()[other_port],
+                    );
+                }
+                DeviceId::Router(_) => {
+                    EthernetPort::connect(
+                        &mut component.device.ports()[port],
+                        &mut dr.routers[other_i].device.ports()[other_port],
+                    );
+                }
+            }
+        }
+
+        match d1 {
+            DeviceId::Desktop(_) => {
+                connect_desktop(self, d1_i, p2, d2, d2_i);
+            }
+            DeviceId::Switch(_) => {
+                connect_switch(self, d1_i, p1, p2, d2, d2_i);
+            }
+            DeviceId::Router(_) => {
+                connect_router(self, d1_i, p1, p2, d2, d2_i);
+            }
+        }
+
+        self.adj_devices
+            .entry(d1)
+            .or_insert(Vec::new())
+            .push((p1, d2, p2));
+        self.adj_devices
+            .entry(d2)
+            .or_insert(Vec::new())
+            .push((p2, d1, p1));
+    }
+
+    fn disconnect(&mut self, id: DeviceId, port: usize) {
+        fn _dc(dr: &mut DeviceRepository, id: DeviceId, i: usize, port: usize) {
+            match id {
+                DeviceId::Desktop(_) => {
+                    dr.desktops[i].device.interface.disconnect();
+                }
+                DeviceId::Switch(_) => {
+                    dr.switches[i].device.disconnect(port);
+                }
+                DeviceId::Router(_) => {
+                    dr.routers[i].device.disconnect(port);
+                }
+            }
+        }
+
+        let d1_id = id;
+        let d1_adjacency = {
+            let adj_list = self.adj_devices.get(&d1_id);
+            adj_list.and_then(|adj| adj.iter().find(|(p, _, _)| *p == port).cloned())
+        };
+
+        if let Some((d1_port, d2_id, d2_port)) = d1_adjacency {
+            if let Some(adj) = self.adj_devices.get_mut(&d1_id) {
+                adj.retain(|(p, _, _)| *p != d1_port);
+            }
+            if let Some(adj) = self.adj_devices.get_mut(&d2_id) {
+                adj.retain(|(p, _, _)| *p != d2_port);
+            }
+
+            let (d1_i, d2_i) = (self.lookup(d1_id), self.lookup(d2_id));
+
+            _dc(self, d1_id, d1_i, d1_port);
+            _dc(self, d2_id, d2_i, d2_port);
+            return;
+        }
+    }
 }
 
 type CommandFunction<T> = fn(&mut Terminal<T>, &mut T, &[&str]) -> ();
@@ -751,21 +845,6 @@ impl<T> Terminal<T> {
                 .push_back(format!("Error: '{}' is not a valid command", cmd));
         }
     }
-}
-
-macro_rules! ipv4_fmt {
-    ($ip:expr) => {
-        format!("{}.{}.{}.{}", $ip[0], $ip[1], $ip[2], $ip[3])
-    };
-}
-
-macro_rules! mac_fmt {
-    ($mac:expr) => {
-        format!(
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            $mac[0], $mac[1], $mac[2], $mac[3], $mac[4], $mac[5]
-        )
-    };
 }
 
 impl Terminal<Router> {
@@ -1154,8 +1233,6 @@ impl Terminal<Desktop> {
                             self.awaiting_command = None;
                             return;
                         }
-                    } else {
-                        desktop.received.push(frame);
                     }
                 }
             }

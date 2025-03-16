@@ -56,6 +56,13 @@ impl EthernetFrame {
             EthernetFrame::Ethernet802_3(frame) => frame.source_address,
         }
     }
+
+    pub fn protocol(&self) -> EtherType {
+        match self {
+            EthernetFrame::Ethernet2(frame) => frame.ether_type,
+            EthernetFrame::Ethernet802_3(_) => EtherType::Debug, // bpdu
+        }
+    }
 }
 
 impl ByteSerializable for EthernetFrame {

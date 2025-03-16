@@ -8,8 +8,8 @@ mod utils;
 
 /*
 todo:
-- make devices deleteable
-- make connections detachable
+- make devices deleteable                                                                done
+- make connections detachable                                                            done
 - add packet tracing for all packets
 - add packet full detail view
 - fix place in buttons bug

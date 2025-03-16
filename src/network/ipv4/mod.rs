@@ -153,7 +153,7 @@ impl ByteSerializable for Ipv4Frame {
 }
 
 /// Address Resolution Protocol (ARP) operation code
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ArpOperation {
     Request = 1,
     Reply = 2,

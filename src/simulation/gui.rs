@@ -1,10 +1,35 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::SystemTime};
 
 use raylib::prelude::*;
 
-use crate::simulation::{device::DeviceAttributes, utils};
+use crate::{
+    ipv4_fmt, mac_fmt,
+    network::{
+        device::router::RipFrame,
+        ethernet::{
+            ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, EthernetFrame,
+        },
+        ipv4::{ArpFrame, IcmpFrame, Ipv4Frame},
+    },
+    simulation::{
+        device::DeviceAttributes,
+        utils::{self, rstr_from_string},
+    },
+    tick::TimeProvider,
+};
 
-use super::device::{DeviceGetQuery, DeviceId, DeviceKind, DeviceRepository, DeviceSetQuery};
+use super::{
+    device::{DeviceGetQuery, DeviceId, DeviceKind, DeviceRepository, DeviceSetQuery},
+    utils::PacketKind,
+};
+
+#[derive(Clone)]
+struct Packet {
+    last: Option<DeviceId>,
+    current: DeviceId,
+    kind: PacketKind,
+    time: SystemTime,
+}
 
 #[derive(Copy, Clone)]
 struct Dropdown {
@@ -60,6 +85,9 @@ pub struct Gui {
     terminal_out: VecDeque<String>,
     terminal_buffer: [u8; 0xFF],
     terminal_device: Option<DeviceId>,
+
+    packet_buffer: VecDeque<Packet>,
+    packet_selected: Option<Packet>,
 }
 
 impl Default for Gui {
@@ -76,6 +104,8 @@ impl Default for Gui {
             terminal_out: VecDeque::new(),
             terminal_buffer: [0u8; 0xFF],
             terminal_device: None,
+            packet_buffer: VecDeque::new(),
+            packet_selected: None,
         }
     }
 }
@@ -345,22 +375,36 @@ impl Gui {
 
         // Terminal
         // -----------------------------------
-        let mut terminal_y = (3.0 / 4.0) * screen_height as f32;
-        d.gui_set_style(
-            GuiControl::DEFAULT,
-            GuiDefaultProperty::BACKGROUND_COLOR as i32,
-            Color::new(0, 0, 0, 0).color_to_int(),
+        let terminal_y = (3.0 / 4.0) * screen_height as f32;
+
+        // Terminal header
+        d.draw_text(
+            "Terminal",
+            PADDING,
+            terminal_y as i32 + FONT_SIZE / 2,
+            2 * FONT_SIZE,
+            Color::WHITE,
         );
-        d.gui_panel(
-            Rectangle {
-                x: 0.0,
-                y: terminal_y,
-                width: (screen_width / 3) as f32,
-                height: screen_height as f32 - terminal_y - PADDING as f32,
-            },
-            Some(rstr!("Terminal")),
+
+        // lones above and below temrinal just like packet tracer has lines for columns
+        d.draw_line(
+            0,
+            (terminal_y + 3.0 * FONT_SIZE as f32) as i32,
+            (screen_width - PADDING) as i32,
+            (terminal_y + 3.0 * FONT_SIZE as f32) as i32,
+            Color::WHITE,
         );
-        terminal_y += 3.0 * PADDING as f32;
+
+        // lnine above header
+        d.draw_line(
+            0,
+            terminal_y as i32,
+            (screen_width - PADDING) as i32,
+            terminal_y as i32,
+            Color::WHITE,
+        );
+
+        let terminal_text_start_y = terminal_y + 4.0 * FONT_SIZE as f32;
 
         {
             d.gui_set_style(
@@ -418,7 +462,7 @@ impl Gui {
 
         let out_y = std::cmp::min(self.terminal_out.len(), MAX_TERMINAL_LINES) as f32
             * ((FONT_SIZE + PADDING / 2) as f32)
-            + terminal_y;
+            + terminal_text_start_y;
 
         if let Some(Some(da)) = self
             .terminal_device
@@ -461,7 +505,7 @@ impl Gui {
             // Output
             self.terminal_out.extend(dr.get_terminal_out(da.id));
 
-            let mut out_y = terminal_y;
+            let mut out_y = terminal_text_start_y;
             for line in self
                 .terminal_out
                 .iter()
@@ -472,23 +516,492 @@ impl Gui {
                 d.draw_text(line, PADDING, out_y as i32, FONT_SIZE, Color::WHITE);
                 out_y += (FONT_SIZE + PADDING / 2) as f32;
             }
+        } else {
+            let message = "Right click a device to open terminal";
+            let message_size = d.measure_text(message, FONT_SIZE);
+            d.draw_text(
+                message,
+                screen_width / 6 - message_size,
+                terminal_y as i32 + (screen_height - terminal_y as i32) as i32 / 2,
+                2 * FONT_SIZE,
+                Color::GRAY,
+            );
         }
         // -----------------------------------
 
         // Packet Tracer
         // -----------------------------------
-        let mut table_y = (3.0 / 4.0) * screen_height as f32;
-        d.gui_panel(
-            Rectangle {
-                x: (screen_width / 3 - 1) as f32,
-                y: table_y,
-                width: (2.0 / 3.0) * screen_width as f32,
-                height: screen_height as f32 - table_y - PADDING as f32,
-            },
-            Some(rstr!("Packet Tracer")),
-        );
-        table_y += 3.0 * PADDING as f32;
+        let table_y = (3.0 / 4.0) * screen_height as f32;
+        let table_bounds = Rectangle {
+            x: (screen_width / 3) as f32,
+            y: table_y,
+            width: (2.0 / 3.0) * screen_width as f32,
+            height: screen_height as f32 - table_y,
+        };
 
+        for (
+            id,
+            ((incoming_device_id, incoming_packets), (outgoing_device_id, outgoing_packets)),
+        ) in dr.sniff()
+        {
+            let time = {
+                let tp = TimeProvider::instance().lock().unwrap();
+                tp.now()
+            };
+
+            for packet in incoming_packets {
+                let packet = Packet {
+                    last: incoming_device_id,
+                    current: id,
+                    kind: packet,
+                    time,
+                };
+
+                self.packet_buffer.push_back(packet);
+            }
+
+            // for packet in outgoing_packets {
+            //     self.packet_buffer.push_back(Packet {
+            //         last: incoming_device_id,
+            //         current: id,
+            //         kind: packet,
+            //         time,
+            //     });
+            // }
+        }
+
+        let col_width = table_bounds.width / 6.0;
+
+        const COLUMN_HEADERS: [&str; 4] = ["Time (ms)", "Last Device", "At Device", "Type"];
+
+        d.gui_set_style(
+            GuiControl::DEFAULT,
+            GuiDefaultProperty::TEXT_SIZE as i32,
+            2 * FONT_SIZE,
+        );
+        d.gui_set_style(
+            GuiControl::LABEL,
+            GuiControlProperty::TEXT_COLOR_NORMAL as i32,
+            Color::WHITE.color_to_int(),
+        );
+
+        for (i, column) in COLUMN_HEADERS.iter().enumerate() {
+            d.draw_text(
+                column,
+                (table_bounds.x + col_width * i as f32) as i32 + 10,
+                table_bounds.y as i32 + FONT_SIZE / 2,
+                2 * FONT_SIZE,
+                Color::WHITE,
+            );
+
+            d.draw_line(
+                (table_bounds.x + col_width * i as f32) as i32,
+                table_bounds.y as i32,
+                (table_bounds.x + col_width * i as f32) as i32,
+                (table_bounds.y + table_bounds.height) as i32,
+                Color::WHITE,
+            );
+        }
+
+        let mut y = table_bounds.y + 4.0 * FONT_SIZE as f32;
+        for packet in self.packet_buffer.iter().rev() {
+            let last_device = packet.last.map_or("-----".to_string(), |id| {
+                dr.get(DeviceGetQuery::Id(id)).unwrap().label
+            });
+            let at_device = dr.get(DeviceGetQuery::Id(packet.current)).unwrap().label;
+            let packet_type = match packet.kind {
+                PacketKind::Arp(_) => "ARP",
+                PacketKind::Bpdu(_) => "BPDU",
+                PacketKind::Rip(_) => "RIP",
+                PacketKind::Icmp(_) => "ICMP",
+            };
+
+            let mut label_clicked = false;
+
+            let mut bounds = Rectangle::new(
+                table_bounds.x as f32 + 10.0,
+                y,
+                col_width as f32,
+                FONT_SIZE as f32,
+            );
+
+            label_clicked |= d.gui_label_button(bounds, Some(rstr!("0")));
+            bounds.x += col_width as f32;
+
+            label_clicked |=
+                d.gui_label_button(bounds, Some(rstr_from_string(last_device).as_c_str()));
+            bounds.x += col_width as f32;
+
+            label_clicked |=
+                d.gui_label_button(bounds, Some(rstr_from_string(at_device).as_c_str()));
+            bounds.x += col_width as f32;
+
+            label_clicked |= d.gui_label_button(
+                bounds,
+                Some(rstr_from_string(packet_type.into()).as_c_str()),
+            );
+            bounds.x += col_width as f32;
+            y += 2.0 * FONT_SIZE as f32;
+
+            if label_clicked {
+                self.packet_selected = Some(packet.clone());
+            }
+        }
+
+        // -----------------------------------
+
+        // Packet Detail
+        // -----------------------------------
+        d.draw_line(
+            (table_bounds.x + 4.0 * col_width) as i32,
+            table_bounds.y as i32,
+            (table_bounds.x + 4.0 * col_width) as i32,
+            (table_bounds.y + table_bounds.height) as i32,
+            Color::WHITE,
+        );
+
+        // "Selected Packet Details" header
+        d.draw_text(
+            "Selected Packet Details",
+            (table_bounds.x + 4.0 * col_width) as i32 + 10,
+            table_bounds.y as i32 + FONT_SIZE / 2,
+            2 * FONT_SIZE,
+            Color::WHITE,
+        );
+
+        fn display_eth2_info(y: &mut i32, x: i32, eth: &Ethernet2Frame, d: &mut RaylibDrawHandle) {
+            let source_address = mac_fmt!(eth.source_address);
+            let destination_address = mac_fmt!(eth.destination_address);
+
+            d.draw_text("Ethernet II", x, *y, FONT_SIZE, Color::WHITE);
+            d.draw_line(
+                x,
+                *y + FONT_SIZE,
+                x + d.measure_text("Ethernet II", FONT_SIZE),
+                *y + FONT_SIZE,
+                Color::WHITE,
+            );
+            *y += FONT_SIZE + PADDING / 2;
+
+            d.draw_text(
+                &format!("Source: {}", source_address),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("Destination: {}", destination_address),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("EtherType: {:?}", eth.ether_type),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+            *y += FONT_SIZE;
+        }
+
+        fn display_eth802_3_info(
+            y: &mut i32,
+            x: i32,
+            eth: &Ethernet802_3Frame,
+            d: &mut RaylibDrawHandle,
+        ) {
+            let source_address = mac_fmt!(eth.source_address);
+            let destination_address = mac_fmt!(eth.destination_address);
+
+            d.draw_text("Ethernet 802.3", x, *y, FONT_SIZE, Color::WHITE);
+            d.draw_line(
+                x,
+                *y + FONT_SIZE,
+                x + d.measure_text("Ethernet 802.3", FONT_SIZE),
+                *y + FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE + PADDING / 2;
+
+            d.draw_text(
+                &format!("Source: {}", source_address),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("Destination: {}", destination_address),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("Length: {}", eth.length),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("DSAP: {:02X}", eth.dsap),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("SSAP: {:02X}", eth.ssap),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("Control: {:02X}", eth.control),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+        }
+
+        fn display_ipv4_info(y: &mut i32, x: i32, ipv4: &Ipv4Frame, d: &mut RaylibDrawHandle) {
+            d.draw_text("IPv4", x, *y, FONT_SIZE, Color::WHITE);
+            d.draw_line(
+                x,
+                *y + FONT_SIZE,
+                x + d.measure_text("IPv4", FONT_SIZE),
+                *y + FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE + PADDING / 2;
+
+            d.draw_text(
+                format!("Destination: {}", ipv4_fmt!(ipv4.destination)).as_str(),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                format!("Source: {}", ipv4_fmt!(ipv4.source)).as_str(),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("Protocol: {:?}", ipv4.protocol),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+
+            d.draw_text(
+                &format!("TTL: {}", ipv4.ttl),
+                x,
+                *y,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+
+            *y += FONT_SIZE;
+        }
+
+        if let Some(packet) = &self.packet_selected {
+            let mut y = table_bounds.y as i32 + 4 * FONT_SIZE;
+            let x = (table_bounds.x + 4.0 * col_width) as i32 + 10;
+            match &packet.kind {
+                PacketKind::Arp(eth) => {
+                    display_eth2_info(&mut y, x, &eth, d);
+
+                    y += (1.5 * PADDING as f32) as i32;
+
+                    let arp_frame = ArpFrame::from_bytes(eth.data.clone()).unwrap();
+
+                    d.draw_text("ARP", x, y, FONT_SIZE, Color::WHITE);
+                    d.draw_line(
+                        x,
+                        y + FONT_SIZE,
+                        x + d.measure_text("ARP", FONT_SIZE),
+                        y + FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE + PADDING / 2;
+
+                    d.draw_text(
+                        &format!("Operation: {:?}", arp_frame.opcode),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Sender MAC: {}", mac_fmt!(arp_frame.sender_mac)),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Sender IP: {}", ipv4_fmt!(arp_frame.sender_ip)),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Target MAC: {}", mac_fmt!(arp_frame.target_mac)),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text(
+                        &format!("Target IP: {}", ipv4_fmt!(arp_frame.target_ip)),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+                }
+                PacketKind::Bpdu(eth) => {
+                    display_eth802_3_info(&mut y, x, &eth, d);
+                }
+                PacketKind::Rip(eth) => {
+                    display_eth2_info(&mut y, x, &eth, d);
+
+                    y += (1.5 * PADDING as f32) as i32;
+
+                    let ipv4_frame = Ipv4Frame::from_bytes(eth.data.clone()).unwrap();
+                    display_ipv4_info(&mut y, x, &ipv4_frame, d);
+
+                    // Switch to column 2
+                    y = table_bounds.y as i32 + 4 * FONT_SIZE;
+                    let x = (table_bounds.x + 5.0 * col_width) as i32 + 10;
+                    let rip_frame = RipFrame::from_bytes(ipv4_frame.data.clone()).unwrap();
+
+                    d.draw_text("RIP", x, y, FONT_SIZE, Color::WHITE);
+                    d.draw_line(
+                        x,
+                        y + FONT_SIZE,
+                        x + d.measure_text("RIP", FONT_SIZE),
+                        y + FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE + PADDING / 2;
+
+                    d.draw_text(
+                        &format!("Command: {:?}", rip_frame.command),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE;
+
+                    d.draw_text("Routes: TODO", x, y, FONT_SIZE, Color::WHITE); // TODO: Display routes
+                }
+                PacketKind::Icmp(eth) => {
+                    display_eth2_info(&mut y, x, &eth, d);
+
+                    y += (1.5 * PADDING as f32) as i32;
+
+                    let ipv4_frame = Ipv4Frame::from_bytes(eth.data.clone()).unwrap();
+                    display_ipv4_info(&mut y, x, &ipv4_frame, d);
+
+                    // Switch to column 2
+                    y = table_bounds.y as i32 + 4 * FONT_SIZE;
+                    let x = (table_bounds.x + 5.0 * col_width) as i32 + 10;
+                    let icmp_frame = IcmpFrame::from_bytes(ipv4_frame.data.clone()).unwrap();
+
+                    d.draw_text("ICMP", x, y, FONT_SIZE, Color::WHITE);
+                    d.draw_line(
+                        x,
+                        y + FONT_SIZE,
+                        x + d.measure_text("ICMP", FONT_SIZE),
+                        y + FONT_SIZE,
+                        Color::WHITE,
+                    );
+
+                    y += FONT_SIZE + PADDING / 2;
+
+                    d.draw_text(
+                        &format!("Type: {:?}", icmp_frame.icmp_type),
+                        x,
+                        y,
+                        FONT_SIZE,
+                        Color::WHITE,
+                    );
+                }
+            }
+        } else {
+            let message = "Click a table row\n to view details";
+            let message_size = d.measure_text(message, FONT_SIZE);
+            d.draw_text(
+                message,
+                (table_bounds.x + 4.0 * col_width) as i32 + message_size,
+                table_bounds.y as i32 + (table_bounds.height as i32) / 2,
+                2 * FONT_SIZE,
+                Color::GRAY,
+            );
+        }
         // -----------------------------------
 
         d.gui_load_style_default();
