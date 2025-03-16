@@ -214,108 +214,115 @@ impl Gui {
         // Edit Dropdown Menu
         // -----------------------------------
         if let Some(mut dropdown) = self.edit_dropdown {
-            let da = dr.get(DeviceGetQuery::Id(dropdown.device)).unwrap();
-            let pos = da.pos;
+            if let Some(da) = dr.get(DeviceGetQuery::Id(dropdown.device)) {
+                let pos = da.pos;
 
-            let options = ["Terminal", "Delete; Disconnect"];
-            let height = 10 * FONT_SIZE;
-            let bounds = Rectangle::new(
-                pos.x + PADDING as f32,
-                pos.y + PADDING as f32,
-                DROPDOWN_WIDTH as f32 / 1.5,
-                height as f32,
-            );
-            self.gui_bounds.push(bounds);
+                let options = ["Terminal", "Delete; Disconnect"];
+                let height = 10 * FONT_SIZE;
+                let bounds = Rectangle::new(
+                    pos.x + PADDING as f32,
+                    pos.y + PADDING as f32,
+                    DROPDOWN_WIDTH as f32 / 1.5,
+                    height as f32,
+                );
+                self.gui_bounds.push(bounds);
 
-            d.gui_list_view(
-                bounds,
-                Some(utils::rstr_from_string(options.join(";")).as_c_str()),
-                &mut dropdown.scroll_index,
-                &mut dropdown.value,
-            );
+                d.gui_list_view(
+                    bounds,
+                    Some(utils::rstr_from_string(options.join(";")).as_c_str()),
+                    &mut dropdown.scroll_index,
+                    &mut dropdown.value,
+                );
 
-            match dropdown.value {
-                0 => {
-                    self.edit_dropdown = None;
-                    self.terminal_device = Some(dropdown.device);
-
-                    // TODO: Save terminal instances in memory?
-                    self.terminal_buffer = [0u8; 0xFF];
-                    self.terminal_out.clear();
+                match dropdown.value {
+                    0 => {
+                        self.terminal_device = Some(dropdown.device);
+                        self.terminal_buffer = [0u8; 0xFF];
+                        self.terminal_out.clear();
+                        self.reset_states();
+                    }
+                    1 => {
+                        dr.set(dropdown.device, DeviceSetQuery::Delete);
+                        self.reset_states();
+                    }
+                    2 => {
+                        self.reset_states();
+                        self.ethernet_dropdown = Some(Dropdown::new(dropdown.device));
+                        self.mode = Some(GuiMode::EthernetDisconnect);
+                        self.gui_consume_this_click = false;
+                    }
+                    _ => {
+                        self.edit_dropdown = Some(dropdown);
+                    }
                 }
-                1 => {
-                    dr.set(dropdown.device, DeviceSetQuery::Delete);
-                    self.reset_states();
-                }
-                2 => {
-                    self.edit_dropdown = None;
-                    self.ethernet_dropdown = Some(Dropdown::new(dropdown.device));
-                    self.mode = Some(GuiMode::EthernetDisconnect);
-                    self.gui_consume_this_click = false; // Ethernet dropdown will immediately consume click, stop it from doing so.
-                }
-                _ => {
-                    self.edit_dropdown = Some(dropdown);
-                }
+            } else {
+                self.edit_dropdown = None; // dr.get failed
             }
         }
+
         // -----------------------------------
 
         // Ethernet Dropdown Menu
         // -----------------------------------
-        if !self.gui_consume_this_click { // checkmate rust
-        } else if let Some(mut dropdown) = self.ethernet_dropdown {
-            let da = dr.get(DeviceGetQuery::Id(dropdown.device)).unwrap();
-            let DeviceAttributes { ports_len, pos, .. } = da;
+        if !self.gui_consume_this_click {
+            // checkmate rust
+        } else if let Some(mut dropdown) = self.ethernet_dropdown.take() {
+            if let Some(da) = dr.get(DeviceGetQuery::Id(dropdown.device)) {
+                let DeviceAttributes { ports_len, pos, .. } = da;
 
-            // A dropdown with ports_len options saying "Ethernet Port 0/i" for desktops, switches and "GigabitEthernet 0/i" for routers
-            let height = std::cmp::min(DROPDOWN_MAX_HEIGHT, ports_len as i32 * (3 * FONT_SIZE));
-            let bounds = Rectangle::new(
-                pos.x + PADDING as f32,
-                pos.y + PADDING as f32,
-                DROPDOWN_WIDTH as f32,
-                height as f32,
-            );
-            self.gui_bounds.push(bounds);
+                let height = std::cmp::min(DROPDOWN_MAX_HEIGHT, ports_len as i32 * (3 * FONT_SIZE));
+                let bounds = Rectangle::new(
+                    pos.x + PADDING as f32,
+                    pos.y + PADDING as f32,
+                    DROPDOWN_WIDTH as f32,
+                    height as f32,
+                );
+                self.gui_bounds.push(bounds);
 
-            let label = match dropdown.device {
-                DeviceId::Desktop(_) | DeviceId::Switch(_) => "Ethernet Port",
-                DeviceId::Router(_) => "GigabitEthernet",
-            };
-            let options = (0..ports_len)
-                .map(|i| format!("{} 0/{}", label, i))
-                .collect::<Vec<String>>();
+                let label = match dropdown.device {
+                    DeviceId::Desktop(_) | DeviceId::Switch(_) => "Ethernet Port",
+                    DeviceId::Router(_) => "GigabitEthernet",
+                };
+                let options = (0..ports_len)
+                    .map(|i| format!("{} 0/{}", label, i))
+                    .collect::<Vec<String>>();
 
-            d.gui_list_view(
-                bounds,
-                Some(utils::rstr_from_string(options.join(";")).as_c_str()),
-                &mut dropdown.scroll_index,
-                &mut dropdown.value,
-            );
+                d.gui_list_view(
+                    bounds,
+                    Some(utils::rstr_from_string(options.join(";")).as_c_str()),
+                    &mut dropdown.scroll_index,
+                    &mut dropdown.value,
+                );
 
-            if dropdown.value >= 0 {
-                if self.mode == Some(GuiMode::EthernetDisconnect) {
-                    dr.set(
-                        dropdown.device,
-                        DeviceSetQuery::Disconnect(dropdown.value as usize),
-                    );
-                    self.mode = None;
+                if dropdown.value >= 0 {
+                    if self.mode == Some(GuiMode::EthernetDisconnect) {
+                        dr.set(
+                            dropdown.device,
+                            DeviceSetQuery::Disconnect(dropdown.value as usize),
+                        );
+                        self.mode = None;
+                    }
+                    //
+                    else if self.connect_d1.is_none() {
+                        self.connect_d1 = Some((dropdown.device, dropdown.value as usize));
+                        self.mode = Some(GuiMode::EthernetConnection);
+                    }
+                    //
+                    else if self.connect_d2.is_none() {
+                        self.connect_d2 = Some((dropdown.device, dropdown.value as usize));
+                        self.mode = None;
+                    }
+                    self.ethernet_dropdown = None;
+                } else {
+                    self.ethernet_dropdown = Some(dropdown);
                 }
-                //
-                else if self.connect_d1.is_none() {
-                    self.connect_d1 = Some((dropdown.device, dropdown.value as usize));
-                    self.mode = Some(GuiMode::EthernetConnection);
-                }
-                //
-                else if self.connect_d2.is_none() {
-                    self.connect_d2 = Some((dropdown.device, dropdown.value as usize));
-                    self.mode = None;
-                }
-                self.ethernet_dropdown = None;
             } else {
-                self.ethernet_dropdown = Some(dropdown);
+                self.ethernet_dropdown = None; // dr.get failed
             }
         }
+
         // -----------------------------------
+
         {
             d.gui_set_style(
                 GuiControl::BUTTON,
@@ -658,9 +665,9 @@ impl Gui {
 
                 for packet in incoming_packets {
                     self.packet_buffer.push_back(Packet::new(
-                        incoming_device_id.map_or(Vector2::new(0.0, 0.0), |id| {
-                            dr.get(DeviceGetQuery::Id(id)).unwrap().pos
-                        }),
+                        incoming_device_id
+                            .and_then(|id| dr.get(DeviceGetQuery::Id(id)).map(|device| device.pos))
+                            .unwrap_or(Vector2::new(0.0, 0.0)),
                         incoming_device_id,
                         id,
                         packet,
@@ -671,7 +678,8 @@ impl Gui {
                 for packet in outgoing_packets {
                     if let Some(_) = outgoing_device_id {
                         self.packet_buffer.push_back(Packet::new(
-                            dr.get(DeviceGetQuery::Id(id)).unwrap().pos,
+                            dr.get(DeviceGetQuery::Id(id))
+                                .map_or(Vector2::new(0.0, 0.0), |device| device.pos),
                             None,
                             id,
                             packet,
@@ -722,9 +730,13 @@ impl Gui {
         let mut y = table_bounds.y + 4.0 * FONT_SIZE as f32;
         for packet in self.packet_buffer.iter().rev() {
             let last_device = packet.last.map_or("-----".to_string(), |id| {
-                dr.get(DeviceGetQuery::Id(id)).unwrap().label
+                dr.get(DeviceGetQuery::Id(id))
+                    .map_or("Unknown".to_string(), |device| device.label.clone())
             });
-            let at_device = dr.get(DeviceGetQuery::Id(packet.current)).unwrap().label;
+            let at_device = dr
+                .get(DeviceGetQuery::Id(packet.current))
+                .map_or("Unknown".to_string(), |device| device.label.clone());
+
             let packet_type = match packet.kind {
                 PacketKind::Arp(_) => "ARP",
                 PacketKind::Bpdu(_) => "BPDU",
@@ -1137,7 +1149,6 @@ impl Gui {
         {
             self.selection = Some(*kind);
         } else if rl.is_key_pressed(KeyboardKey::KEY_SPACE) {
-            println!("here");
             self.selection = Some(if self.tracer_enabled {
                 GuiButtonClickKind::PlayerPause
             } else {
@@ -1154,15 +1165,16 @@ impl Gui {
                     continue;
                 }
 
-                let da = dr.get(DeviceGetQuery::Id(packet.current)).unwrap();
-                let pos = da.pos;
-                if packet.pos.distance_to(pos) < 1.0 {
-                    continue;
+                if let Some(da) = dr.get(DeviceGetQuery::Id(packet.current)) {
+                    let pos = da.pos;
+                    if packet.pos.distance_to(pos) < 1.0 {
+                        continue;
+                    }
+                    packet.pos = Vector2::new(
+                        packet.pos.x + (pos.x - packet.pos.x) * 0.1,
+                        packet.pos.y + (pos.y - packet.pos.y) * 0.1,
+                    );
                 }
-                packet.pos = Vector2::new(
-                    packet.pos.x + (pos.x - packet.pos.x) * 0.1,
-                    packet.pos.y + (pos.y - packet.pos.y) * 0.1,
-                );
             }
         }
         // -----------------------------------
@@ -1176,14 +1188,12 @@ impl Gui {
                 .or(None);
             return;
         }
-
         // -----------------------------------
 
         // Drag Device
         // -----------------------------------
         if self.mode == Some(GuiMode::Drag) && !is_left_mouse_down {
-            self.mode = None;
-            self.drag_device = None;
+            self.reset_states();
             return;
         }
 
@@ -1191,7 +1201,7 @@ impl Gui {
             if let Some(device) = self.drag_device {
                 dr.set(device, DeviceSetQuery::Pos(mouse_pos));
             } else {
-                self.mode = None;
+                self.reset_states();
             }
             return;
         }
@@ -1227,6 +1237,12 @@ impl Gui {
             {
                 return;
             }
+
+            if self.edit_dropdown.is_some() {
+                self.reset_states();
+                return;
+            }
+
             self.gui_consume_this_click = false; // Clicks should not propogate to the render function if they are consumed by the update function
         }
 

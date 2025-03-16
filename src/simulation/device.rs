@@ -248,12 +248,14 @@ impl DeviceRepository {
                 None
             }
             DeviceGetQuery::Id(id) => {
-                let i = self.lookup(id);
-                match id {
-                    DeviceId::Router(_) => Some(self.routers[i].attributes.clone()),
-                    DeviceId::Switch(_) => Some(self.switches[i].attributes()),
-                    DeviceId::Desktop(_) => Some(self.desktops[i].attributes()),
+                if let Some(i) = self.lookup.get(&id.as_u64()) {
+                    return match id {
+                        DeviceId::Router(_) => Some(self.routers[*i].attributes.clone()),
+                        DeviceId::Switch(_) => Some(self.switches[*i].attributes()),
+                        DeviceId::Desktop(_) => Some(self.desktops[*i].attributes()),
+                    };
                 }
+                None
             }
         }
     }

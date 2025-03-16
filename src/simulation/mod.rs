@@ -6,21 +6,6 @@ use raylib::prelude::*;
 
 mod utils;
 
-/*
-todo:
-- make devices deleteable                                                                done
-- make connections detachable                                                            done
-- add packet tracing for all packets                                                     done
-- add packet full detail view                                                            done
-- add packet tracer mode                                                                 done
-- fix place in buttons bug                                                               done
-- tooltip for buttons
-- key shortcut for buttons
-- terminal dynamic size
-- gui rendering order
-- delete bug
-*/
-
 pub fn run() {
     let (mut rl, thread) = raylib::init()
         .resizable()
