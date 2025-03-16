@@ -238,8 +238,8 @@ impl ByteSerializable for ArpFrame {
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(self.hardware_type as u16).to_be_bytes());
-        bytes.extend_from_slice(&(self.protocol_type as u16).to_be_bytes());
+        bytes.extend_from_slice(&(self.hardware_type).to_be_bytes());
+        bytes.extend_from_slice(&(self.protocol_type).to_be_bytes());
         bytes.push(self.hardware_size);
         bytes.push(self.protocol_size);
         bytes.extend_from_slice(&(self.opcode as u16).to_be_bytes());

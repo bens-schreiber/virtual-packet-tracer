@@ -107,17 +107,14 @@ impl<T: Eq + Hash + Clone> TickTimer<T> {
             tp.now()
         };
 
-        if None == self.map.get(&key) {
+        self.map.entry(key).or_insert_with(|| {
             let time_to_ready = now + Duration::new(interval_in_seconds, 0);
-            self.map.insert(
-                key,
-                (
-                    time_to_ready,
-                    Duration::new(interval_in_seconds, 0),
-                    persist,
-                ),
-            );
-        }
+            (
+                time_to_ready,
+                Duration::new(interval_in_seconds, 0),
+                persist,
+            )
+        });
     }
 
     /// Returns a list of keys that are ready to be processed.

@@ -131,6 +131,7 @@ impl Components<Switch> {
     }
 }
 
+#[derive(Default)]
 pub struct DeviceRepository {
     lookup: HashMap<u64, usize>,
 
@@ -143,21 +144,6 @@ pub struct DeviceRepository {
 
     pub cable_simulator: CableSimulator,
     mac_seed: u64,
-}
-
-impl Default for DeviceRepository {
-    fn default() -> Self {
-        Self {
-            lookup: HashMap::new(),
-            routers: Vec::new(),
-            switches: Vec::new(),
-            desktops: Vec::new(),
-            adj_devices: HashMap::new(),
-            cable_simulator: CableSimulator::default(),
-            mac_seed: 0,
-            label_seeds: (0, 0, 0),
-        }
-    }
 }
 
 impl DeviceRepository {
@@ -541,7 +527,7 @@ impl DeviceRepository {
                         outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
                     );
 
-                    adjs.iter().find(|(p, _, _)| *p == i).map(|(_, adj, _)| {
+                    if let Some((_, adj, _)) = adjs.iter().find(|(p, _, _)| *p == i) {
                         values.push((
                             component.attributes.id,
                             (
@@ -549,7 +535,7 @@ impl DeviceRepository {
                                 (Some(*adj), outgoing_packet_kinds),
                             ),
                         ));
-                    });
+                    }
                 }
             }
         }
@@ -568,7 +554,7 @@ impl DeviceRepository {
                         outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
                     );
 
-                    adjs.iter().find(|(p, _, _)| *p == i).map(|(_, adj, _)| {
+                    if let Some((_, adj, _)) = adjs.iter().find(|(p, _, _)| *p == i) {
                         values.push((
                             component.attributes.id,
                             (
@@ -576,7 +562,7 @@ impl DeviceRepository {
                                 (Some(*adj), outgoing_packet_kinds),
                             ),
                         ));
-                    });
+                    }
                 }
             }
         }
@@ -634,8 +620,8 @@ impl DeviceRepository {
             match other_id {
                 DeviceId::Desktop(_) => {
                     EthernetPort::connect(
-                        &mut component.device.interface.ethernet.port(),
-                        &mut dr.desktops[other_i].device.interface.ethernet.port(),
+                        &component.device.interface.ethernet.port(),
+                        &dr.desktops[other_i].device.interface.ethernet.port(),
                     );
                 }
                 DeviceId::Switch(_) => {
@@ -683,8 +669,8 @@ impl DeviceRepository {
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.routers[other_i].device.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
@@ -707,14 +693,14 @@ impl DeviceRepository {
                 }
                 DeviceId::Switch(_) => {
                     EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.switches[other_i].device.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.switches[other_i].device.ports()[other_port],
                     );
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut component.device.ports()[port],
-                        &mut dr.routers[other_i].device.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
@@ -732,14 +718,8 @@ impl DeviceRepository {
             }
         }
 
-        self.adj_devices
-            .entry(d1)
-            .or_insert(Vec::new())
-            .push((p1, d2, p2));
-        self.adj_devices
-            .entry(d2)
-            .or_insert(Vec::new())
-            .push((p2, d1, p1));
+        self.adj_devices.entry(d1).or_default().push((p1, d2, p2));
+        self.adj_devices.entry(d2).or_default().push((p2, d1, p1));
     }
 
     fn disconnect(&mut self, id: DeviceId, port: usize) {
@@ -775,7 +755,6 @@ impl DeviceRepository {
 
             _dc(self, d1_id, d1_i, d1_port);
             _dc(self, d2_id, d2_i, d2_port);
-            return;
         }
     }
 }
@@ -1212,31 +1191,28 @@ impl Terminal<Desktop> {
 
         self.timer.tick();
 
-        match self.awaiting_command.as_deref() {
-            Some("ping") => {
-                // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
-                for frame in desktop.interface.receive() {
-                    if frame.destination != desktop.interface.ip_address {
-                        continue;
-                    }
+        if let Some("ping") = self.awaiting_command.as_deref() {
+            // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
+            for frame in desktop.interface.receive() {
+                if frame.destination != desktop.interface.ip_address {
+                    continue;
+                }
 
-                    if frame.protocol == 1 {
-                        let icmp = match IcmpFrame::from_bytes(frame.data) {
-                            Ok(icmp) => icmp,
-                            Err(_) => {
-                                continue;
-                            }
-                        };
-
-                        if icmp.icmp_type == IcmpType::EchoReply as u8 {
-                            self.out_buf.push_back(String::from("Pong!"));
-                            self.awaiting_command = None;
-                            return;
+                if frame.protocol == 1 {
+                    let icmp = match IcmpFrame::from_bytes(frame.data) {
+                        Ok(icmp) => icmp,
+                        Err(_) => {
+                            continue;
                         }
+                    };
+
+                    if icmp.icmp_type == IcmpType::EchoReply as u8 {
+                        self.out_buf.push_back(String::from("Pong!"));
+                        self.awaiting_command = None;
+                        return;
                     }
                 }
             }
-            _ => {}
         }
     }
 }

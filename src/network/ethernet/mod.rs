@@ -31,7 +31,7 @@ macro_rules! mac_broadcast_addr {
 #[macro_export]
 macro_rules! is_mac_multicast_or_broadcast {
     ($address:expr) => {
-        $address[0] & 0x01 == 0x01 || $address == crate::mac_broadcast_addr!()
+        $address[0] & 0x01 == 0x01 || $address == $crate::mac_broadcast_addr!()
     };
 }
 
@@ -85,8 +85,8 @@ impl ByteSerializable for EthernetFrame {
 #[macro_export]
 macro_rules! eth2 {
     ($destination_address:expr, $source_address:expr, $data:expr, $ether_type:expr) => {
-        crate::network::ethernet::EthernetFrame::Ethernet2(
-            crate::network::ethernet::Ethernet2Frame::new(
+        $crate::network::ethernet::EthernetFrame::Ethernet2(
+            $crate::network::ethernet::Ethernet2Frame::new(
                 $destination_address,
                 $source_address,
                 $data,
@@ -214,7 +214,7 @@ impl ByteSerializable for Ethernet2Frame {
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
-        let ether_type = self.ether_type.clone() as u16;
+        let ether_type = self.ether_type as u16;
 
         bytes.extend_from_slice(&self.preamble);
         bytes.push(self.start_frame_delimiter);

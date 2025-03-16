@@ -164,12 +164,9 @@ impl Router {
     fn _create_rip_frame(&mut self) -> RipFrame {
         let mut frame = RipFrame::new_response();
         for (k, v) in &self.table {
-            frame.routes.push(RipRoute::new(
-                k.clone(),
-                v.subnet_mask,
-                [0, 0, 0, 0],
-                v.metric,
-            ));
+            frame
+                .routes
+                .push(RipRoute::new(*k, v.subnet_mask, [0, 0, 0, 0], v.metric));
         }
         frame
     }

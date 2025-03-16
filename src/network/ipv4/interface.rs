@@ -129,7 +129,7 @@ impl Ipv4Interface {
     }
 
     pub fn connect(&mut self, other: &mut Ipv4Interface) {
-        self.ethernet.connect(&mut other.ethernet);
+        self.ethernet.connect(&other.ethernet);
     }
 
     pub fn disconnect(&mut self) {
@@ -420,7 +420,7 @@ impl Ipv4Interface {
         while self
             .arp_buf
             .last()
-            .is_some_and(|w| w.ttl <= 0 && w.retry <= 0)
+            .is_some_and(|w| w.ttl == 0 && w.retry == 0)
         {
             self.arp_buf.pop();
         }

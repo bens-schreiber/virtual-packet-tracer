@@ -84,11 +84,6 @@ fn Tick_RouterRipMulticast_SendsEveryFiveSeconds() {
         tp.freeze();
     }
 
-    {
-        let mut tp = TimeProvider::instance().lock().unwrap();
-        tp.freeze();
-    }
-
     // Act
     for _ in 0..2 {
         sim.tick();

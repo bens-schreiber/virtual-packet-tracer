@@ -67,19 +67,19 @@ pub enum PacketKind {
 impl PacketKind {
     // TODO: assumes the packet is something we can handle. Currently, there is no "custom" sending of frames, so
     // there is no need to handle unknown frames. This will need to be updated if some kind of custom frame sending is added.
-    pub fn from_bytes(packet: &Vec<u8>) -> PacketKind {
+    pub fn from_bytes(packet: &[u8]) -> PacketKind {
         // Determine if the frame is EthernetII or Ethernet802_3
         let ether_type_or_length = u16::from_be_bytes(packet[20..22].try_into().unwrap());
         let eth_frame = if ether_type_or_length >= 0x0600 {
-            Ethernet2Frame::from_bytes(packet.clone()).unwrap()
+            Ethernet2Frame::from_bytes(packet.to_owned()).unwrap()
         } else {
-            return PacketKind::Bpdu(Ethernet802_3Frame::from_bytes(packet.clone()).unwrap());
+            return PacketKind::Bpdu(Ethernet802_3Frame::from_bytes(packet.to_owned()).unwrap());
         };
 
         match eth_frame.ether_type {
             EtherType::Arp => PacketKind::Arp(eth_frame),
             EtherType::Ipv4 => {
-                let ipv4_frame = Ipv4Frame::from_bytes(eth_frame.data.clone()).unwrap();
+                let ipv4_frame = Ipv4Frame::from_bytes(eth_frame.data.to_owned()).unwrap();
                 match ipv4_frame.protocol {
                     1 => PacketKind::Icmp(eth_frame),
                     17 => PacketKind::Rip(eth_frame),

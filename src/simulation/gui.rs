@@ -6,9 +6,7 @@ use crate::{
     ipv4_fmt, mac_fmt,
     network::{
         device::router::RipFrame,
-        ethernet::{
-            ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, EthernetFrame,
-        },
+        ethernet::{ByteSerializable, Ethernet2Frame, Ethernet802_3Frame},
         ipv4::{ArpFrame, IcmpFrame, Ipv4Frame},
     },
     simulation::{
@@ -134,39 +132,33 @@ impl Gui {
 
         // Gui Mode Rendering
         // -----------------------------------
-        match self.mode {
-            Some(GuiMode::EthernetConnection) => {
-                if let (Some(d1), Some(d2)) =
-                    (self.connect_d1, self.ethernet_dropdown.map(|d| d.device))
-                {
-                    let pos1 = dr.get(DeviceGetQuery::Id(d1.0)).map(|da| da.pos);
-                    let pos2 = dr.get(DeviceGetQuery::Id(d2)).map(|da| da.pos);
+        if let Some(GuiMode::EthernetConnection) = self.mode {
+            if let (Some(d1), Some(d2)) =
+                (self.connect_d1, self.ethernet_dropdown.map(|d| d.device))
+            {
+                let pos1 = dr.get(DeviceGetQuery::Id(d1.0)).map(|da| da.pos);
+                let pos2 = dr.get(DeviceGetQuery::Id(d2)).map(|da| da.pos);
 
-                    if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
-                        d.draw_line_ex(pos1, pos2, 2.0, Color::WHITE);
-                    }
-                }
-                //
-                else if let Some((device, _)) = self.connect_d1 {
-                    if let Some(pos1) = dr.get(DeviceGetQuery::Id(device)).map(|da| da.pos) {
-                        d.draw_line_ex(pos1, mouse_pos, 2.0, Color::WHITE);
-                    }
+                if let (Some(pos1), Some(pos2)) = (pos1, pos2) {
+                    d.draw_line_ex(pos1, pos2, 2.0, Color::WHITE);
                 }
             }
-            _ => {}
+            //
+            else if let Some((device, _)) = self.connect_d1 {
+                if let Some(pos1) = dr.get(DeviceGetQuery::Id(device)).map(|da| da.pos) {
+                    d.draw_line_ex(pos1, mouse_pos, 2.0, Color::WHITE)
+                }
+            }
         }
         // -----------------------------------
 
         // Edit Dropdown Menu
         // -----------------------------------
         if let Some(mut dropdown) = self.edit_dropdown {
-            let da = dr.get(DeviceGetQuery::Id(dropdown.device));
-            if da.is_none() {
-                panic!("Device not found in repository");
-            }
-            let pos = da.unwrap().pos;
+            let da = dr.get(DeviceGetQuery::Id(dropdown.device)).unwrap();
+            let pos = da.pos;
 
-            let options = vec!["Terminal", "Delete; Disconnect"];
+            let options = ["Terminal", "Delete; Disconnect"];
             let height = 10 * FONT_SIZE;
             dropdown.bounds = Rectangle::new(
                 pos.x + PADDING as f32,
@@ -390,7 +382,7 @@ impl Gui {
         d.draw_line(
             0,
             (terminal_y + 3.0 * FONT_SIZE as f32) as i32,
-            (screen_width - PADDING) as i32,
+            screen_width - PADDING,
             (terminal_y + 3.0 * FONT_SIZE as f32) as i32,
             Color::WHITE,
         );
@@ -399,7 +391,7 @@ impl Gui {
         d.draw_line(
             0,
             terminal_y as i32,
-            (screen_width - PADDING) as i32,
+            screen_width - PADDING,
             terminal_y as i32,
             Color::WHITE,
         );
@@ -522,7 +514,7 @@ impl Gui {
             d.draw_text(
                 message,
                 screen_width / 6 - message_size,
-                terminal_y as i32 + (screen_height - terminal_y as i32) as i32 / 2,
+                terminal_y as i32 + (screen_height - terminal_y as i32) / 2,
                 2 * FONT_SIZE,
                 Color::GRAY,
             );
@@ -618,29 +610,24 @@ impl Gui {
 
             let mut label_clicked = false;
 
-            let mut bounds = Rectangle::new(
-                table_bounds.x as f32 + 10.0,
-                y,
-                col_width as f32,
-                FONT_SIZE as f32,
-            );
+            let mut bounds = Rectangle::new(table_bounds.x + 10.0, y, col_width, FONT_SIZE as f32);
 
             label_clicked |= d.gui_label_button(bounds, Some(rstr!("0")));
-            bounds.x += col_width as f32;
+            bounds.x += col_width;
 
             label_clicked |=
                 d.gui_label_button(bounds, Some(rstr_from_string(last_device).as_c_str()));
-            bounds.x += col_width as f32;
+            bounds.x += col_width;
 
             label_clicked |=
                 d.gui_label_button(bounds, Some(rstr_from_string(at_device).as_c_str()));
-            bounds.x += col_width as f32;
+            bounds.x += col_width;
 
             label_clicked |= d.gui_label_button(
                 bounds,
                 Some(rstr_from_string(packet_type.into()).as_c_str()),
             );
-            bounds.x += col_width as f32;
+            bounds.x += col_width;
             y += 2.0 * FONT_SIZE as f32;
 
             if label_clicked {
@@ -852,7 +839,7 @@ impl Gui {
             let x = (table_bounds.x + 4.0 * col_width) as i32 + 10;
             match &packet.kind {
                 PacketKind::Arp(eth) => {
-                    display_eth2_info(&mut y, x, &eth, d);
+                    display_eth2_info(&mut y, x, eth, d);
 
                     y += (1.5 * PADDING as f32) as i32;
 
@@ -916,14 +903,12 @@ impl Gui {
                         FONT_SIZE,
                         Color::WHITE,
                     );
-
-                    y += FONT_SIZE;
                 }
                 PacketKind::Bpdu(eth) => {
-                    display_eth802_3_info(&mut y, x, &eth, d);
+                    display_eth802_3_info(&mut y, x, eth, d);
                 }
                 PacketKind::Rip(eth) => {
-                    display_eth2_info(&mut y, x, &eth, d);
+                    display_eth2_info(&mut y, x, eth, d);
 
                     y += (1.5 * PADDING as f32) as i32;
 
@@ -959,7 +944,7 @@ impl Gui {
                     d.draw_text("Routes: TODO", x, y, FONT_SIZE, Color::WHITE); // TODO: Display routes
                 }
                 PacketKind::Icmp(eth) => {
-                    display_eth2_info(&mut y, x, &eth, d);
+                    display_eth2_info(&mut y, x, eth, d);
 
                     y += (1.5 * PADDING as f32) as i32;
 
@@ -1027,7 +1012,7 @@ impl Gui {
             && self
                 .edit_dropdown
                 .as_ref()
-                .map_or(true, |d| !d.bounds.check_collision_point_rec(mouse_pos))
+                .is_none_or(|d| !d.bounds.check_collision_point_rec(mouse_pos))
         {
             self.edit_dropdown = None;
         }
@@ -1050,7 +1035,7 @@ impl Gui {
             return;
         }
 
-        if is_left_mouse_down && self.mode == None && self.selection == None {
+        if is_left_mouse_down && self.mode.is_none() && self.drag_device.is_none() {
             if let Some(da) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
                 self.mode = Some(GuiMode::Drag);
                 self.drag_device = Some(da.id);
@@ -1072,11 +1057,11 @@ impl Gui {
             || self
                 .ethernet_dropdown
                 .as_ref()
-                .map_or(false, |d| d.bounds.check_collision_point_rec(mouse_pos))
+                .is_some_and(|d| d.bounds.check_collision_point_rec(mouse_pos))
             || self
                 .edit_dropdown
                 .as_ref()
-                .map_or(false, |d| d.bounds.check_collision_point_rec(mouse_pos))
+                .is_some_and(|d| d.bounds.check_collision_point_rec(mouse_pos))
         {
             return;
         }

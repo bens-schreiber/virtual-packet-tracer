@@ -181,9 +181,7 @@ impl Switch {
 
     fn _receive_ethernet2(&mut self, f: Ethernet2Frame, port: usize) {
         // If the sender MAC address is not in the table, add it.
-        if !self.table.contains_key(&f.source_address) {
-            self.table.insert(f.source_address, port);
-        }
+        self.table.entry(f.source_address).or_insert(port);
 
         // If the destination MAC address is in the table, forward the mapped interface
         if let Some(destination_index) = self.table.get(&f.destination_address) {
