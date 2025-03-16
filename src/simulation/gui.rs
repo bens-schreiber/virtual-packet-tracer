@@ -105,6 +105,7 @@ pub struct Gui {
     terminal_out: VecDeque<String>,
     terminal_buffer: [u8; 0xFF],
     terminal_device: Option<DeviceId>,
+    terminal_edit_mode: bool,
 
     packet_buffer: VecDeque<Packet>,
     packet_selected: Option<Packet>,
@@ -128,6 +129,7 @@ impl Default for Gui {
             terminal_out: VecDeque::new(),
             terminal_buffer: [0u8; 0xFF],
             terminal_device: None,
+            terminal_edit_mode: false,
             packet_buffer: VecDeque::new(),
             packet_selected: None,
             tracer_enabled: false,
@@ -259,7 +261,6 @@ impl Gui {
                 self.edit_dropdown = None; // dr.get failed
             }
         }
-
         // -----------------------------------
 
         // Ethernet Dropdown Menu
@@ -320,7 +321,6 @@ impl Gui {
                 self.ethernet_dropdown = None; // dr.get failed
             }
         }
-
         // -----------------------------------
 
         {
@@ -539,12 +539,6 @@ impl Gui {
                 GuiControlProperty::TEXT_COLOR_PRESSED as i32,
                 Color::WHITE.color_to_int(),
             );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
             d.gui_set_style(
                 GuiControl::TEXTBOX,
                 GuiControlProperty::BORDER_COLOR_PRESSED as i32,
@@ -580,6 +574,13 @@ impl Gui {
             .terminal_device
             .map(|id| dr.get(DeviceGetQuery::Id(id)))
         {
+            // edit terminal iff mouse is in the terminal bounds
+            if bottom_panel_bounds.check_collision_point_rec(mouse_pos) {
+                self.terminal_edit_mode = true;
+            } else {
+                self.terminal_edit_mode = false;
+            }
+
             let prompt = format!("{} %", da.label);
             let label_size = d.measure_text(&prompt, FONT_SIZE);
             let max_text_size = d.measure_text("W", FONT_SIZE) * 30; // roughly 30 characters
@@ -594,7 +595,7 @@ impl Gui {
                     FONT_SIZE as f32,
                 ),
                 &mut self.terminal_buffer,
-                true,
+                self.terminal_edit_mode,
             ) && d.is_key_pressed(KeyboardKey::KEY_ENTER)
             {
                 dr.set(
@@ -1137,23 +1138,25 @@ impl Gui {
         let is_left_mouse_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         let is_right_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
 
-        if let Some((_, kind)) = [
-            (KeyboardKey::KEY_D, GuiButtonClickKind::Desktop),
-            (KeyboardKey::KEY_S, GuiButtonClickKind::Switch),
-            (KeyboardKey::KEY_R, GuiButtonClickKind::Router),
-            (KeyboardKey::KEY_E, GuiButtonClickKind::Ethernet),
-            (KeyboardKey::KEY_N, GuiButtonClickKind::PlayerNext),
-        ]
-        .iter()
-        .find(|(key, _)| rl.is_key_pressed(*key))
-        {
-            self.selection = Some(*kind);
-        } else if rl.is_key_pressed(KeyboardKey::KEY_SPACE) {
-            self.selection = Some(if self.tracer_enabled {
-                GuiButtonClickKind::PlayerPause
-            } else {
-                GuiButtonClickKind::PlayerPlay
-            });
+        if !self.terminal_edit_mode {
+            if let Some((_, kind)) = [
+                (KeyboardKey::KEY_D, GuiButtonClickKind::Desktop),
+                (KeyboardKey::KEY_S, GuiButtonClickKind::Switch),
+                (KeyboardKey::KEY_R, GuiButtonClickKind::Router),
+                (KeyboardKey::KEY_E, GuiButtonClickKind::Ethernet),
+                (KeyboardKey::KEY_N, GuiButtonClickKind::PlayerNext),
+            ]
+            .iter()
+            .find(|(key, _)| rl.is_key_pressed(*key))
+            {
+                self.selection = Some(*kind);
+            } else if rl.is_key_pressed(KeyboardKey::KEY_SPACE) {
+                self.selection = Some(if self.tracer_enabled {
+                    GuiButtonClickKind::PlayerPause
+                } else {
+                    GuiButtonClickKind::PlayerPlay
+                });
+            }
         }
         // -----------------------------------
 
