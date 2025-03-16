@@ -515,81 +515,80 @@ impl DeviceRepository {
     )> {
         let mut values = Vec::new();
         for component in &self.routers {
-            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
-                for (i, port) in component.device.ports().iter().enumerate() {
-                    let (incoming, outgoing) = port.borrow().sniff();
-                    if incoming.is_empty() && outgoing.is_empty() {
-                        continue;
-                    }
-
-                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
-                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                    );
-
-                    if let Some((_, adj, _)) = adjs.iter().find(|(p, _, _)| *p == i) {
-                        values.push((
-                            component.attributes.id,
-                            (
-                                (Some(*adj), incoming_packet_kinds),
-                                (Some(*adj), outgoing_packet_kinds),
-                            ),
-                        ));
-                    }
+            for (i, port) in component.device.ports().iter().enumerate() {
+                let (incoming, outgoing) = port.borrow().sniff();
+                if incoming.is_empty() && outgoing.is_empty() {
+                    continue;
                 }
+
+                let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                    incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                );
+
+                let adj = self
+                    .adj_devices
+                    .get(&component.attributes.id)
+                    .and_then(|adjs| {
+                        adjs.iter()
+                            .find(|(p, _, _)| *p == i)
+                            .map(|(_, adj, _)| adj.clone())
+                    });
+                values.push((
+                    component.attributes.id,
+                    ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+                ));
             }
         }
 
         for component in &self.switches {
-            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
-                for (i, port) in component.device.ports().iter().enumerate() {
-                    let (incoming, outgoing) = port.borrow().sniff();
+            for (i, port) in component.device.ports().iter().enumerate() {
+                let (incoming, outgoing) = port.borrow().sniff();
 
-                    if incoming.is_empty() && outgoing.is_empty() {
-                        continue;
-                    }
-
-                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
-                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                    );
-
-                    if let Some((_, adj, _)) = adjs.iter().find(|(p, _, _)| *p == i) {
-                        values.push((
-                            component.attributes.id,
-                            (
-                                (Some(*adj), incoming_packet_kinds),
-                                (Some(*adj), outgoing_packet_kinds),
-                            ),
-                        ));
-                    }
+                if incoming.is_empty() && outgoing.is_empty() {
+                    continue;
                 }
+
+                let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                    incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                );
+
+                let adj = self
+                    .adj_devices
+                    .get(&component.attributes.id)
+                    .and_then(|adjs| {
+                        adjs.iter()
+                            .find(|(p, _, _)| *p == i)
+                            .map(|(_, adj, _)| adj.clone())
+                    });
+                values.push((
+                    component.attributes.id,
+                    ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+                ));
             }
         }
 
         for component in &self.desktops {
-            if let Some(adjs) = self.adj_devices.get(&component.attributes.id) {
-                if let Some(adj) = adjs.first() {
-                    let (incoming, outgoing) =
-                        component.device.interface.ethernet.port().borrow().sniff();
-                    if incoming.is_empty() && outgoing.is_empty() {
-                        continue;
-                    }
-
-                    let (incoming_packet_kinds, outgoing_packet_kinds) = (
-                        incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                        outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
-                    );
-
-                    values.push((
-                        component.attributes.id,
-                        (
-                            (Some(adj.1), incoming_packet_kinds),
-                            (Some(adj.1), outgoing_packet_kinds),
-                        ),
-                    ));
-                }
+            let (incoming, outgoing) = component.device.interface.ethernet.port().borrow().sniff();
+            if incoming.is_empty() && outgoing.is_empty() {
+                continue;
             }
+
+            let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+            );
+
+            let adj = self
+                .adj_devices
+                .get(&component.attributes.id)
+                .and_then(|adjs| adjs.get(0).map(|(_, adj, _)| adj.clone()));
+
+            values.push((
+                component.attributes.id,
+                ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+            ))
         }
 
         values

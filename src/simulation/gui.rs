@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, time::SystemTime};
+use std::{
+    collections::VecDeque,
+    time::{Duration, SystemTime},
+};
 
 use raylib::prelude::*;
 
@@ -34,7 +37,6 @@ struct Dropdown {
     device: DeviceId,
     value: i32,
     scroll_index: i32,
-    bounds: Rectangle,
 }
 
 impl Dropdown {
@@ -43,7 +45,6 @@ impl Dropdown {
             device,
             value: -1,
             scroll_index: 0,
-            bounds: Rectangle::default(),
         }
     }
 }
@@ -64,7 +65,6 @@ enum GuiButtonClickKind {
     PlayerPlay,
     PlayerNext,
     PlayerPause,
-    Terminal,
 }
 
 pub struct Gui {
@@ -75,6 +75,7 @@ pub struct Gui {
     edit_dropdown: Option<Dropdown>,
 
     gui_consume_this_click: bool,
+    gui_bounds: Vec<Rectangle>,
 
     drag_device: Option<DeviceId>,
     connect_d1: Option<(DeviceId, usize)>,
@@ -86,6 +87,9 @@ pub struct Gui {
 
     packet_buffer: VecDeque<Packet>,
     packet_selected: Option<Packet>,
+
+    pub tracer_enabled: bool,
+    pub tracer_next: bool,
 }
 
 impl Default for Gui {
@@ -97,6 +101,7 @@ impl Default for Gui {
             ethernet_dropdown: None,
             edit_dropdown: None,
             gui_consume_this_click: true,
+            gui_bounds: Vec::new(),
             connect_d1: None,
             connect_d2: None,
             terminal_out: VecDeque::new(),
@@ -104,6 +109,8 @@ impl Default for Gui {
             terminal_device: None,
             packet_buffer: VecDeque::new(),
             packet_selected: None,
+            tracer_enabled: false,
+            tracer_next: false,
         }
     }
 }
@@ -113,6 +120,7 @@ impl Gui {
         self.mode = None;
         self.connect_d1 = None;
         self.connect_d2 = None;
+        self.drag_device = None;
         self.selection = None;
         self.ethernet_dropdown = None;
         self.edit_dropdown = None;
@@ -129,8 +137,9 @@ impl Gui {
         let (box_width, box_height) = (55, 55);
         let (screen_width, screen_height) = (d.get_screen_width(), d.get_screen_height());
         let mouse_pos = d.get_mouse_position();
+        self.gui_bounds.clear();
 
-        // Gui Mode Rendering
+        // Ethernet Connection Mode Line Drawing
         // -----------------------------------
         if let Some(GuiMode::EthernetConnection) = self.mode {
             if let (Some(d1), Some(d2)) =
@@ -160,15 +169,16 @@ impl Gui {
 
             let options = ["Terminal", "Delete; Disconnect"];
             let height = 10 * FONT_SIZE;
-            dropdown.bounds = Rectangle::new(
+            let bounds = Rectangle::new(
                 pos.x + PADDING as f32,
                 pos.y + PADDING as f32,
                 DROPDOWN_WIDTH as f32 / 1.5,
                 height as f32,
             );
+            self.gui_bounds.push(bounds);
 
             d.gui_list_view(
-                dropdown.bounds,
+                bounds,
                 Some(utils::rstr_from_string(options.join(";")).as_c_str()),
                 &mut dropdown.scroll_index,
                 &mut dropdown.value,
@@ -209,12 +219,13 @@ impl Gui {
 
             // A dropdown with ports_len options saying "Ethernet Port 0/i" for desktops, switches and "GigabitEthernet 0/i" for routers
             let height = std::cmp::min(DROPDOWN_MAX_HEIGHT, ports_len as i32 * (3 * FONT_SIZE));
-            dropdown.bounds = Rectangle::new(
+            let bounds = Rectangle::new(
                 pos.x + PADDING as f32,
                 pos.y + PADDING as f32,
                 DROPDOWN_WIDTH as f32,
                 height as f32,
             );
+            self.gui_bounds.push(bounds);
 
             let label = match dropdown.device {
                 DeviceId::Desktop(_) | DeviceId::Switch(_) => "Ethernet Port",
@@ -225,7 +236,7 @@ impl Gui {
                 .collect::<Vec<String>>();
 
             d.gui_list_view(
-                dropdown.bounds,
+                bounds,
                 Some(utils::rstr_from_string(options.join(";")).as_c_str()),
                 &mut dropdown.scroll_index,
                 &mut dropdown.value,
@@ -255,7 +266,6 @@ impl Gui {
             }
         }
         // -----------------------------------
-
         {
             d.gui_set_style(
                 GuiControl::BUTTON,
@@ -304,6 +314,7 @@ impl Gui {
             let y = PADDING + (box_height + PADDING) * (i as i32);
             let x = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
+            self.gui_bounds.push(bounds);
 
             if d.gui_button(bounds, None) && self.gui_consume_this_click {
                 self.selection = Some(*kind);
@@ -335,21 +346,29 @@ impl Gui {
 
         // Player controls
         // -----------------------------------
-        const RIGHT_CORNER_MENU: [(GuiButtonClickKind, GuiIconName); 2] = [
+        let right_corner_menu: [(GuiButtonClickKind, GuiIconName); 2] = [
             (
-                GuiButtonClickKind::PlayerPlay,
-                GuiIconName::ICON_PLAYER_PLAY,
+                GuiButtonClickKind::PlayerNext,
+                GuiIconName::ICON_PLAYER_NEXT,
             ),
-            (
-                GuiButtonClickKind::PlayerPause,
-                GuiIconName::ICON_PLAYER_PAUSE,
-            ),
+            if self.tracer_enabled {
+                (
+                    GuiButtonClickKind::PlayerPause,
+                    GuiIconName::ICON_PLAYER_PAUSE,
+                )
+            } else {
+                (
+                    GuiButtonClickKind::PlayerPlay,
+                    GuiIconName::ICON_PLAYER_PLAY,
+                )
+            },
         ];
 
-        for (i, (kind, icon)) in RIGHT_CORNER_MENU.iter().enumerate() {
+        for (i, (kind, icon)) in right_corner_menu.iter().enumerate() {
             let x = (screen_width - PADDING) - (PADDING + box_width) * (i as i32) - box_width;
             let y = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
+            self.gui_bounds.push(bounds);
 
             if d.gui_button(bounds, None) && self.gui_consume_this_click {
                 self.selection = Some(*kind);
@@ -365,11 +384,18 @@ impl Gui {
         }
         // -----------------------------------
 
+        let bottom_panel_bounds = Rectangle::new(
+            0.0,
+            (3.0 / 4.0) * screen_height as f32,
+            screen_width as f32,
+            screen_height as f32 - (3.0 / 4.0) * screen_height as f32,
+        );
+        self.gui_bounds.push(bottom_panel_bounds);
+
         // Terminal
         // -----------------------------------
-        let terminal_y = (3.0 / 4.0) * screen_height as f32;
+        let terminal_y = bottom_panel_bounds.y;
 
-        // Terminal header
         d.draw_text(
             "Terminal",
             PADDING,
@@ -378,7 +404,6 @@ impl Gui {
             Color::WHITE,
         );
 
-        // lones above and below temrinal just like packet tracer has lines for columns
         d.draw_line(
             0,
             (terminal_y + 3.0 * FONT_SIZE as f32) as i32,
@@ -387,7 +412,6 @@ impl Gui {
             Color::WHITE,
         );
 
-        // lnine above header
         d.draw_line(
             0,
             terminal_y as i32,
@@ -523,7 +547,7 @@ impl Gui {
 
         // Packet Tracer
         // -----------------------------------
-        let table_y = (3.0 / 4.0) * screen_height as f32;
+        let table_y = bottom_panel_bounds.y;
         let table_bounds = Rectangle {
             x: (screen_width / 3) as f32,
             y: table_y,
@@ -531,35 +555,46 @@ impl Gui {
             height: screen_height as f32 - table_y,
         };
 
-        for (
-            id,
-            ((incoming_device_id, incoming_packets), (outgoing_device_id, outgoing_packets)),
-        ) in dr.sniff()
-        {
-            let time = {
-                let tp = TimeProvider::instance().lock().unwrap();
-                tp.now()
-            };
-
-            for packet in incoming_packets {
-                let packet = Packet {
-                    last: incoming_device_id,
-                    current: id,
-                    kind: packet,
-                    time,
+        if !self.tracer_enabled || self.tracer_next {
+            // Only sniff packets
+            for (
+                id,
+                ((incoming_device_id, incoming_packets), (outgoing_device_id, outgoing_packets)),
+            ) in dr.sniff()
+            {
+                let time = {
+                    let tp = TimeProvider::instance().lock().unwrap();
+                    tp.now()
                 };
 
-                self.packet_buffer.push_back(packet);
-            }
+                for packet in incoming_packets {
+                    let packet = Packet {
+                        last: incoming_device_id,
+                        current: id,
+                        kind: packet,
+                        time,
+                    };
 
-            // for packet in outgoing_packets {
-            //     self.packet_buffer.push_back(Packet {
-            //         last: incoming_device_id,
-            //         current: id,
-            //         kind: packet,
-            //         time,
-            //     });
-            // }
+                    self.packet_buffer.push_back(packet);
+                }
+
+                for packet in outgoing_packets {
+                    if let Some(outgoing_device_id) = outgoing_device_id {
+                        let packet = Packet {
+                            last: None,
+                            current: id,
+                            kind: packet,
+                            time,
+                        };
+
+                        self.packet_buffer.push_back(packet);
+                    }
+                }
+            }
+        }
+
+        while self.packet_buffer.len() > 10 {
+            self.packet_buffer.pop_front(); // take only top 10 packets
         }
 
         let col_width = table_bounds.width / 6.0;
@@ -994,10 +1029,10 @@ impl Gui {
     }
 
     pub fn update(&mut self, rl: &RaylibHandle, dr: &mut DeviceRepository) {
+        let mouse_pos = rl.get_mouse_position();
         let is_left_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let is_left_mouse_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         let is_right_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
-        let mouse_pos = rl.get_mouse_position();
 
         // Edit Dropdown
         // -----------------------------------
@@ -1006,21 +1041,14 @@ impl Gui {
                 .get(DeviceGetQuery::Pos(mouse_pos))
                 .map(|da| Dropdown::new(da.id))
                 .or(None);
+            return;
         }
 
-        if is_left_mouse_clicked
-            && self
-                .edit_dropdown
-                .as_ref()
-                .is_none_or(|d| !d.bounds.check_collision_point_rec(mouse_pos))
-        {
-            self.edit_dropdown = None;
-        }
         // -----------------------------------
 
         // Drag Device
         // -----------------------------------
-        if is_left_mouse_clicked && self.mode == Some(GuiMode::Drag) {
+        if self.mode == Some(GuiMode::Drag) && !is_left_mouse_down {
             self.mode = None;
             self.drag_device = None;
             return;
@@ -1035,12 +1063,16 @@ impl Gui {
             return;
         }
 
-        if is_left_mouse_down && self.mode.is_none() && self.drag_device.is_none() {
+        if is_left_mouse_down
+            && self.mode.is_none()
+            && self.drag_device.is_none()
+            && self.selection.is_none()
+        {
             if let Some(da) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
                 self.mode = Some(GuiMode::Drag);
                 self.drag_device = Some(da.id);
+                return;
             }
-            return;
         }
         // -----------------------------------
 
@@ -1050,27 +1082,27 @@ impl Gui {
         {
             dr.set(d1_id, DeviceSetQuery::Connect(d2_id, d1_port, d2_port));
             self.reset_states();
+            return;
         }
         // -----------------------------------
 
-        if !is_left_mouse_clicked
-            || self
-                .ethernet_dropdown
-                .as_ref()
-                .is_some_and(|d| d.bounds.check_collision_point_rec(mouse_pos))
-            || self
-                .edit_dropdown
-                .as_ref()
-                .is_some_and(|d| d.bounds.check_collision_point_rec(mouse_pos))
-        {
-            return;
+        if is_left_mouse_clicked {
+            if self
+                .gui_bounds
+                .iter()
+                .any(|b| b.check_collision_point_rec(mouse_pos))
+            {
+                return;
+            }
+            self.gui_consume_this_click = false; // Clicks should not propogate to the render function if they are consumed by the update function
         }
-
-        self.gui_consume_this_click = false; // RayGUI does click logic in render. If a click is consumed here, we don't want the render to consume it again.
 
         // Ethernet Connection Mode
         // -----------------------------------
         if self.selection == Some(GuiButtonClickKind::Ethernet) {
+            if !is_left_mouse_clicked {
+                return;
+            }
             if let Some(da) = dr.get(DeviceGetQuery::Pos(mouse_pos)) {
                 self.ethernet_dropdown = Some(Dropdown::new(da.id));
             } else {
@@ -1084,17 +1116,35 @@ impl Gui {
         // -----------------------------------
         if let Some(selection) = self.selection {
             match selection {
-                GuiButtonClickKind::Desktop => {
+                GuiButtonClickKind::Desktop if is_left_mouse_clicked => {
                     dr.add(DeviceKind::Desktop, mouse_pos);
-                    self.selection = None;
+                    self.reset_states();
                 }
-                GuiButtonClickKind::Switch => {
+                GuiButtonClickKind::Switch if is_left_mouse_clicked => {
                     dr.add(DeviceKind::Switch, mouse_pos);
-                    self.selection = None;
+                    self.reset_states();
                 }
-                GuiButtonClickKind::Router => {
+                GuiButtonClickKind::Router if is_left_mouse_clicked => {
                     dr.add(DeviceKind::Router, mouse_pos);
-                    self.selection = None;
+                    self.reset_states();
+                }
+                GuiButtonClickKind::PlayerPlay => {
+                    let mut tp = TimeProvider::instance().lock().unwrap();
+                    tp.freeze();
+                    self.tracer_enabled = true;
+                    self.reset_states();
+                }
+                GuiButtonClickKind::PlayerPause => {
+                    let mut tp = TimeProvider::instance().lock().unwrap();
+                    tp.unfreeze();
+                    self.tracer_enabled = false;
+                    self.reset_states();
+                }
+                GuiButtonClickKind::PlayerNext => {
+                    let mut tp = TimeProvider::instance().lock().unwrap();
+                    tp.advance(Duration::from_millis(1));
+                    self.tracer_next = true;
+                    self.reset_states();
                 }
                 _ => {}
             }

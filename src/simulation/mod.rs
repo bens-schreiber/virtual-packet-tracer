@@ -10,8 +10,9 @@ mod utils;
 todo:
 - make devices deleteable                                                                done
 - make connections detachable                                                            done
-- add packet tracing for all packets
-- add packet full detail view
+- add packet tracing for all packets                                                     done
+- add packet full detail view                                                            done
+- add packet tracer mode
 - fix place in buttons bug
 - tooltip for buttons
 - key shortcut for buttons
@@ -32,7 +33,12 @@ pub fn run() {
     let mut dr = device::DeviceRepository::default();
 
     while !rl.window_should_close() {
-        dr.update();
+        if !gui.tracer_enabled {
+            dr.update();
+        } else if gui.tracer_next {
+            dr.update();
+            gui.tracer_next = false;
+        }
         gui.update(&rl, &mut dr);
 
         let mut d = rl.begin_drawing(&thread);
