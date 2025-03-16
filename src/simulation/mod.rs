@@ -13,10 +13,10 @@ todo:
 - add packet tracing for all packets                                                     done
 - add packet full detail view                                                            done
 - add packet tracer mode                                                                 done
-- fix place in buttons bug
+- fix place in buttons bug                                                               done
 - tooltip for buttons
 - key shortcut for buttons
-- terminal messages dynamic height cap
+- terminal dynamic size
 - gui rendering order
 - delete bug
 */

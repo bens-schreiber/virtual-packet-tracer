@@ -350,20 +350,44 @@ impl Gui {
 
         // Left menu
         // -----------------------------------
-        const LEFT_MENU: [(GuiButtonClickKind, GuiIconName); 4] = [
-            (GuiButtonClickKind::Desktop, GuiIconName::ICON_MONITOR),
+        const LEFT_MENU: [(GuiButtonClickKind, GuiIconName, &str); 4] = [
+            (
+                GuiButtonClickKind::Desktop,
+                GuiIconName::ICON_MONITOR,
+                "Place Desktop (D)",
+            ),
             (
                 GuiButtonClickKind::Switch,
                 GuiIconName::ICON_CURSOR_SCALE_FILL,
+                "Place Switch (S)",
             ),
-            (GuiButtonClickKind::Router, GuiIconName::ICON_SHUFFLE_FILL),
-            (GuiButtonClickKind::Ethernet, GuiIconName::ICON_LINK_NET),
+            (
+                GuiButtonClickKind::Router,
+                GuiIconName::ICON_SHUFFLE_FILL,
+                "Place Router (R)",
+            ),
+            (
+                GuiButtonClickKind::Ethernet,
+                GuiIconName::ICON_LINK_NET,
+                "Connect Ethernet (E)",
+            ),
         ];
 
-        for (i, (kind, icon)) in LEFT_MENU.iter().enumerate() {
+        for (i, (kind, icon, label)) in LEFT_MENU.iter().enumerate() {
             let y = PADDING + (box_height + PADDING) * (i as i32);
             let x = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
+
+            if bounds.check_collision_point_rec(mouse_pos) {
+                d.draw_text(
+                    label,
+                    x + box_width + PADDING,
+                    y + box_height / 2,
+                    FONT_SIZE,
+                    Color::WHITE,
+                );
+            }
+
             self.gui_bounds.push(bounds);
 
             if d.gui_button(bounds, None) && self.gui_consume_this_click {
@@ -396,28 +420,43 @@ impl Gui {
 
         // Player controls
         // -----------------------------------
-        let right_corner_menu: [(GuiButtonClickKind, GuiIconName); 2] = [
+        let right_corner_menu: [(GuiButtonClickKind, GuiIconName, &str); 2] = [
             (
                 GuiButtonClickKind::PlayerNext,
                 GuiIconName::ICON_PLAYER_NEXT,
+                "Next (N)",
             ),
             if self.tracer_enabled {
                 (
                     GuiButtonClickKind::PlayerPause,
                     GuiIconName::ICON_PLAYER_PAUSE,
+                    "Pause (Space)",
                 )
             } else {
                 (
                     GuiButtonClickKind::PlayerPlay,
                     GuiIconName::ICON_PLAYER_PLAY,
+                    "Start (Space)",
                 )
             },
         ];
 
-        for (i, (kind, icon)) in right_corner_menu.iter().enumerate() {
+        for (i, (kind, icon, label)) in right_corner_menu.iter().enumerate() {
             let x = (screen_width - PADDING) - (PADDING + box_width) * (i as i32) - box_width;
             let y = PADDING;
             let bounds = Rectangle::new(x as f32, y as f32, box_width as f32, box_height as f32);
+
+            if bounds.check_collision_point_rec(mouse_pos) {
+                // draw under the bounds
+                d.draw_text(
+                    label,
+                    bounds.x as i32,
+                    bounds.y as i32 + box_height + PADDING,
+                    FONT_SIZE,
+                    Color::WHITE,
+                );
+            }
+
             self.gui_bounds.push(bounds);
 
             if d.gui_button(bounds, None) && self.gui_consume_this_click {
@@ -1079,10 +1118,33 @@ impl Gui {
     }
 
     pub fn update(&mut self, rl: &RaylibHandle, dr: &mut DeviceRepository) {
+        // Input
+        // -----------------------------------
         let mouse_pos = rl.get_mouse_position();
         let is_left_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT);
         let is_left_mouse_down = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT);
         let is_right_mouse_clicked = rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_RIGHT);
+
+        if let Some((_, kind)) = [
+            (KeyboardKey::KEY_D, GuiButtonClickKind::Desktop),
+            (KeyboardKey::KEY_S, GuiButtonClickKind::Switch),
+            (KeyboardKey::KEY_R, GuiButtonClickKind::Router),
+            (KeyboardKey::KEY_E, GuiButtonClickKind::Ethernet),
+            (KeyboardKey::KEY_N, GuiButtonClickKind::PlayerNext),
+        ]
+        .iter()
+        .find(|(key, _)| rl.is_key_pressed(*key))
+        {
+            self.selection = Some(*kind);
+        } else if rl.is_key_pressed(KeyboardKey::KEY_SPACE) {
+            println!("here");
+            self.selection = Some(if self.tracer_enabled {
+                GuiButtonClickKind::PlayerPause
+            } else {
+                GuiButtonClickKind::PlayerPlay
+            });
+        }
+        // -----------------------------------
 
         // Packet Tracer Enabled
         // -----------------------------------
