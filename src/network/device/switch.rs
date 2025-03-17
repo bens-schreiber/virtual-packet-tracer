@@ -181,9 +181,7 @@ impl Switch {
 
     fn _receive_ethernet2(&mut self, f: Ethernet2Frame, port: usize) {
         // If the sender MAC address is not in the table, add it.
-        if !self.table.contains_key(&f.source_address) {
-            self.table.insert(f.source_address, port);
-        }
+        self.table.entry(f.source_address).or_insert(port);
 
         // If the destination MAC address is in the table, forward the mapped interface
         if let Some(destination_index) = self.table.get(&f.destination_address) {
@@ -220,8 +218,8 @@ impl Switch {
     }
 
     /// Returns the STP state of the port.
-    pub fn port_state(&self, port_id: usize) -> bool {
-        self.ports[port_id].borrow().stp_state == StpState::Discarding
+    pub fn is_port_up(&self, port_id: usize) -> bool {
+        self.ports[port_id].borrow().stp_state != StpState::Discarding
     }
 
     pub fn bridge_priority(&self) -> u16 {
@@ -247,6 +245,10 @@ impl Switch {
     pub fn set_bridge_priority(&mut self, priority: u16) {
         self.bridge_priority = priority;
         self.root_bid = crate::bridge_id!(self.mac_address, priority);
+    }
+
+    pub fn mac_table(&self) -> HashMap<MacAddress, usize> {
+        self.table.clone()
     }
 
     /// Returns all ports in the designated role.
@@ -501,7 +503,7 @@ impl Switch {
             rp
         };
 
-        let (new_root_cost, new_root_port_id, mut root_changed) = match new_root_port {
+        let (new_root_cost, new_root_port_id, root_changed) = match new_root_port {
             Some((root_cost, _, root_port_id)) => {
                 if self.root_port.is_some_and(|rp| rp != root_port_id)
                     && self.ports[root_port_id].borrow().stp_role != Some(StpRole::Alternate)

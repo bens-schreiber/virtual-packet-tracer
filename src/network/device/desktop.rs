@@ -1,12 +1,7 @@
-use crate::{
-    mac_addr,
-    network::ipv4::{interface::Ipv4Interface, Ipv4Frame},
-    tick::Tickable,
-};
+use crate::{mac_addr, network::ipv4::interface::Ipv4Interface, tick::Tickable};
 
 pub struct Desktop {
     pub interface: Ipv4Interface,
-    pub received: Vec<Ipv4Frame>,
 }
 
 impl Desktop {
@@ -18,13 +13,12 @@ impl Desktop {
 
         Self {
             interface: Ipv4Interface::new(mac_addr, ip_addr, subnet_mask, default_gateway),
-            received: vec![],
         }
     }
 }
 
 impl Tickable for Desktop {
     fn tick(&mut self) {
-        self.received.extend(self.interface.receive());
+        self.interface.receive();
     }
 }

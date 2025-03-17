@@ -13,12 +13,12 @@ use crate::{
 use super::cable::EthernetPort;
 
 /// A route in the router's routing table.
-#[derive(Debug, Eq, PartialEq, Hash)]
-struct Route {
-    ip_address: Ipv4Address, // Network address
-    subnet_mask: Ipv4Address,
-    metric: u32, // Hops until the destination
-    port: usize,
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub struct Route {
+    pub ip_address: Ipv4Address, // Network address
+    pub subnet_mask: Ipv4Address,
+    pub metric: u32, // Hops until the destination
+    pub port: usize,
 }
 
 impl Route {
@@ -164,12 +164,9 @@ impl Router {
     fn _create_rip_frame(&mut self) -> RipFrame {
         let mut frame = RipFrame::new_response();
         for (k, v) in &self.table {
-            frame.routes.push(RipRoute::new(
-                k.clone(),
-                v.subnet_mask,
-                [0, 0, 0, 0],
-                v.metric,
-            ));
+            frame
+                .routes
+                .push(RipRoute::new(*k, v.subnet_mask, [0, 0, 0, 0], v.metric));
         }
         frame
     }
@@ -305,6 +302,24 @@ impl Router {
     pub fn is_port_up(&self, port: usize) -> bool {
         self.ports[port].borrow().enabled
     }
+
+    pub fn routing_table(&self) -> HashMap<Ipv4Address, Route> {
+        self.table.clone()
+    }
+
+    /// Returns (IP, Subnet, Port, Enabled, RIP Enabled)
+    pub fn interface_config(&self) -> Vec<(Ipv4Address, Ipv4Address, usize, bool, bool)> {
+        self.ports
+            .iter()
+            .enumerate()
+            .map(|(i, rp)| {
+                let rp = rp.borrow();
+                let ip = rp.interface.borrow().ip_address;
+                let subnet = rp.interface.borrow().subnet_mask;
+                (ip, subnet, i, rp.enabled, rp.rip_enabled)
+            })
+            .collect()
+    }
 }
 
 impl Tickable for Router {
@@ -323,7 +338,7 @@ impl Tickable for Router {
     }
 }
 
-struct RipRoute {
+pub struct RipRoute {
     address_family: u16, // 0x0002
     route_tag: u16,      // 0x0000
     ip_address: Ipv4Address,
@@ -350,8 +365,8 @@ impl RipRoute {
     }
 }
 
-struct RipFrame {
-    command: u8, // 1 = Request, 2 = Response
+pub struct RipFrame {
+    pub command: u8, // 1 = Request, 2 = Response
     version: u8,
     routes: Vec<RipRoute>,
 }

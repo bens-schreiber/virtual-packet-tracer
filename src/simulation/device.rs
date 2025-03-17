@@ -1,15 +1,9 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use raylib::{
-    color::Color,
-    ffi::{self, GuiControl, GuiControlProperty, GuiIconName, KeyboardKey, MouseButton},
-    math::{Rectangle, Vector2},
-    prelude::{RaylibDraw, RaylibDrawHandle},
-    rgui::RaylibDrawGui,
-    rstr, RaylibHandle,
-};
+use raylib::prelude::*;
 
 use crate::{
+    ipv4_fmt, mac_fmt,
     network::{
         device::{
             cable::{CableSimulator, EthernetPort},
@@ -17,1858 +11,1208 @@ use crate::{
             router::Router,
             switch::Switch,
         },
-        ethernet::MacAddress,
+        ethernet::ByteSerializable,
+        ipv4::{IcmpFrame, IcmpType},
     },
-    tick::Tickable,
+    simulation::utils,
+    tick::{TickTimer, Tickable},
 };
 
-use super::{
-    terminal::{desktop::DesktopTerminal, router::RouterTerminal, switch::SwitchTerminal},
-    utils, GuiMode, GuiState,
-};
+use super::utils::PacketKind;
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+const ROUTER_DISPLAY_RADIUS: f32 = 25.0;
+const SWITCH_DISPLAY_LENGTH: i32 = 45;
+const DESKTOP_DISPLAY_SIZE: i32 = SWITCH_DISPLAY_LENGTH; // roughly
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceId {
-    Desktop(u32),
-    Switch(u32),
-    Router(u32),
+    Router(u64),
+    Switch(u64),
+    Desktop(u64),
 }
 
 impl DeviceId {
-    pub fn as_u32(&self) -> u32 {
+    fn as_u64(&self) -> u64 {
         match self {
-            DeviceId::Desktop(id) => *id,
-            DeviceId::Switch(id) => *id,
-            DeviceId::Router(id) => *id,
+            DeviceId::Router(i) => *i,
+            DeviceId::Switch(i) => *i,
+            DeviceId::Desktop(i) => *i,
         }
     }
 }
 
-pub trait Entity: Tickable {
-    fn pos(&self) -> Vector2;
-    fn set_pos(&mut self, pos: Vector2);
-    fn is_deleted(&self) -> bool;
-    fn bounding_box(&self) -> Rectangle;
-    fn render(&self, d: &mut RaylibDrawHandle);
+pub enum DeviceKind {
+    Desktop,
+    Switch,
+    Router,
 }
 
-pub trait Storable {
-    fn store(entities: &mut Devices, pos: Vector2)
-    where
-        Self: Sized;
+pub enum DeviceGetQuery {
+    Pos(Vector2),
+    Id(DeviceId),
 }
 
-pub trait Device: Entity + Storable {
-    fn id(&self) -> DeviceId;
-
-    fn mac_addr(&self, port: usize) -> MacAddress;
-
-    fn label(&self) -> String;
-
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState);
-
-    /// Handle clicking on any entity gui, ie dropdown or edit window
-    fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool;
-
-    /// Opens a dropdown menu at the given position
-    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState);
-
-    /// Returns all ports in the ports list that have egress and ingress traffic
-    fn traffic(&self, ports: Vec<usize>) -> Vec<(usize, bool)>; // (Port, Ingress)
-
-    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>); // (Ingress, Egress)
-
-    /// Bounds of the edit window
-    fn gui_bounds(&self) -> Rectangle;
-
-    fn is_port_up(&self, port: usize) -> bool;
+pub enum DeviceSetQuery {
+    Pos(Vector2),
+    Connect(DeviceId, usize, usize), // Adj Device, Self Port, Adj Port
+    Delete,
+    Disconnect(usize),
+    TerminalInput(String),
 }
 
-/// Stores all entities in the simulation. Search for devices by their DeviceId.
+#[derive(Clone)]
+pub struct DeviceAttributes {
+    pub id: DeviceId,
+    pub label: String,
+    pub pos: Vector2,
+    pub ports_len: usize,
+    deleted: bool,
+}
+
+struct Components<T> {
+    attributes: DeviceAttributes,
+    terminal: Terminal<T>,
+    device: T,
+}
+
+impl<T> Components<T> {
+    fn new(
+        id: DeviceId,
+        terminal: Terminal<T>,
+        label: String,
+        pos: Vector2,
+        device: T,
+        ports_len: usize,
+    ) -> Self {
+        Self {
+            attributes: DeviceAttributes {
+                id,
+                label,
+                pos,
+                ports_len,
+                deleted: false,
+            },
+            terminal,
+            device,
+        }
+    }
+
+    fn input(&mut self, input: &str) {
+        self.terminal.execute(&mut self.device, input);
+    }
+}
+
+impl Components<Desktop> {
+    fn tick(&mut self) {
+        self.terminal.tick(&mut self.device);
+        self.device.tick();
+    }
+
+    fn attributes(&self) -> DeviceAttributes {
+        DeviceAttributes {
+            pos: Vector2::new(
+                self.attributes.pos.x + (DESKTOP_DISPLAY_SIZE / 2) as f32,
+                self.attributes.pos.y + (DESKTOP_DISPLAY_SIZE / 2) as f32,
+            ),
+            ..self.attributes.clone()
+        }
+    }
+}
+
+impl Components<Switch> {
+    fn attributes(&self) -> DeviceAttributes {
+        DeviceAttributes {
+            pos: Vector2::new(
+                self.attributes.pos.x + (SWITCH_DISPLAY_LENGTH / 2) as f32,
+                self.attributes.pos.y + (SWITCH_DISPLAY_LENGTH / 2) as f32,
+            ),
+            ..self.attributes.clone()
+        }
+    }
+}
+
 #[derive(Default)]
-pub struct Devices {
-    lookup: HashMap<DeviceId, usize>,
-    seed: u32, // EntityId generator
+pub struct DeviceRepository {
+    lookup: HashMap<u64, usize>,
 
-    desktops: Vec<DesktopDevice>,
-    switches: Vec<SwitchDevice>,
-    routers: Vec<RouterDevice>,
-    pub packets: Vec<PacketEntity>,
+    routers: Vec<Components<Router>>,
+    switches: Vec<Components<Switch>>,
+    desktops: Vec<Components<Desktop>>,
+    label_seeds: (i32, i32, i32), // (router, switch, desktop)
 
-    // label purposes; monotonically increasing
-    desktop_count: usize,
-    switch_count: usize,
-    router_count: usize,
+    adj_devices: HashMap<DeviceId, Vec<(usize, DeviceId, usize)>>, // Id -> (Self Port, Adjacent Id, Adjacent Port)
 
-    cable_sim: CableSimulator,
-
-    pub adj_devices: HashMap<DeviceId, Vec<(usize, DeviceId, usize)>>, // EntityId -> (Self Port, Adjacent EntityId, Adjacent Port)
+    pub cable_simulator: CableSimulator,
+    mac_seed: u64,
 }
 
-impl Devices {
-    /// Adds a device to the simulation
-    pub fn add<T: Device>(&mut self, pos: Vector2) {
-        T::store(self, pos)
-    }
+impl DeviceRepository {
+    pub fn add(&mut self, kind: DeviceKind, pos: Vector2) {
+        self.mac_seed += 1;
+        match kind {
+            DeviceKind::Router => {
+                let label: i32 = {
+                    self.label_seeds.0 += 1;
+                    self.label_seeds.0
+                };
+                let component = Components::new(
+                    DeviceId::Router(self.mac_seed),
+                    Terminal::new_router(),
+                    format!("Router {}", label),
+                    pos,
+                    Router::from_seed(self.mac_seed),
+                    8,
+                );
 
-    pub fn get(&self, id: DeviceId) -> &dyn Device {
-        let i = *self.lookup.get(&id).unwrap();
-        match id {
-            DeviceId::Desktop(_) => &self.desktops[i],
-            DeviceId::Switch(_) => &self.switches[i],
-            DeviceId::Router(_) => &self.routers[i],
-        }
-    }
-
-    pub fn get_mut(&mut self, id: DeviceId) -> &mut dyn Device {
-        let i = *self.lookup.get(&id).unwrap();
-        match id {
-            DeviceId::Desktop(_) => &mut self.desktops[i],
-            DeviceId::Switch(_) => &mut self.switches[i],
-            DeviceId::Router(_) => &mut self.routers[i],
-        }
-    }
-
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &dyn Device> {
-        self.desktops
-            .iter()
-            .map(|e| e as &dyn Device)
-            .chain(self.switches.iter().map(|e| e as &dyn Device))
-            .chain(self.routers.iter().map(|e| e as &dyn Device))
-    }
-
-    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut dyn Device> {
-        self.desktops
-            .iter_mut()
-            .map(|e| e as &mut dyn Device)
-            .chain(self.switches.iter_mut().map(|e| e as &mut dyn Device))
-            .chain(self.routers.iter_mut().map(|e| e as &mut dyn Device))
-    }
-
-    fn next_id_seed(&mut self) -> u32 {
-        self.seed += 1;
-        self.seed
-    }
-
-    pub fn packets_empty(&self) -> bool {
-        self.packets.is_empty()
-    }
-    pub fn update(&mut self, tick_devices: bool) {
-        let mut lazy_delete = vec![];
-        for e in self.iter_mut() {
-            if e.is_deleted() {
-                lazy_delete.push(e.id());
-                continue;
+                self.lookup.insert(self.mac_seed, self.routers.len());
+                self.cable_simulator.adds(component.device.ports());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.routers.push(component);
             }
-            if tick_devices {
-                e.tick();
+            DeviceKind::Switch => {
+                let label: i32 = {
+                    self.label_seeds.1 += 1;
+                    self.label_seeds.1
+                };
+                let component = Components::new(
+                    DeviceId::Switch(self.mac_seed),
+                    Terminal::new_switch(),
+                    format!("Switch {}", label),
+                    pos,
+                    Switch::from_seed(self.mac_seed, label as u16),
+                    32,
+                );
+
+                self.lookup.insert(self.mac_seed, self.switches.len());
+                self.cable_simulator.adds(component.device.ports());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.switches.push(component);
+            }
+            DeviceKind::Desktop => {
+                let label: i32 = {
+                    self.label_seeds.2 += 1;
+                    self.label_seeds.2
+                };
+                let component = Components::new(
+                    DeviceId::Desktop(self.mac_seed),
+                    Terminal::new_desktop(),
+                    format!("Desktop {}", label),
+                    pos,
+                    Desktop::from_seed(self.mac_seed),
+                    1,
+                );
+
+                self.lookup.insert(self.mac_seed, self.desktops.len());
+                self.cable_simulator
+                    .add(component.device.interface.ethernet.port());
+                self.mac_seed += component.attributes.ports_len as u64;
+                self.desktops.push(component);
+            }
+        }
+    }
+
+    pub fn get(&self, query: DeviceGetQuery) -> Option<DeviceAttributes> {
+        match query {
+            // Linear search, no point in optimizing this for now.
+            DeviceGetQuery::Pos(pos) => {
+                for component in self.routers.iter() {
+                    if component.attributes.pos.distance_to(pos) < ROUTER_DISPLAY_RADIUS {
+                        return Some(component.attributes.clone());
+                    }
+                }
+
+                for component in self.switches.iter() {
+                    let rec = Rectangle {
+                        x: component.attributes.pos.x,
+                        y: component.attributes.pos.y,
+                        width: SWITCH_DISPLAY_LENGTH as f32,
+                        height: SWITCH_DISPLAY_LENGTH as f32,
+                    };
+                    if rec.check_collision_point_rec(pos) {
+                        return Some(component.attributes());
+                    }
+                }
+
+                for component in self.desktops.iter() {
+                    let rec = Rectangle {
+                        x: component.attributes.pos.x,
+                        y: component.attributes.pos.y,
+                        width: DESKTOP_DISPLAY_SIZE as f32,
+                        height: DESKTOP_DISPLAY_SIZE as f32,
+                    };
+                    if rec.check_collision_point_rec(pos) {
+                        return Some(component.attributes());
+                    }
+                }
+
+                None
+            }
+            DeviceGetQuery::Id(id) => {
+                if let Some(i) = self.lookup.get(&id.as_u64()) {
+                    return match id {
+                        DeviceId::Router(_) => Some(self.routers[*i].attributes.clone()),
+                        DeviceId::Switch(_) => Some(self.switches[*i].attributes()),
+                        DeviceId::Desktop(_) => Some(self.desktops[*i].attributes()),
+                    };
+                }
+                None
+            }
+        }
+    }
+
+    pub fn get_terminal_output(&mut self, id: DeviceId) -> Vec<String> {
+        let i = self.lookup(id);
+        let out_buf = match id {
+            DeviceId::Router(_) => &mut self.routers[i].terminal.out_buf,
+            DeviceId::Switch(_) => &mut self.switches[i].terminal.out_buf,
+            DeviceId::Desktop(_) => &mut self.desktops[i].terminal.out_buf,
+        };
+        out_buf.drain(..).collect()
+    }
+
+    pub fn set(&mut self, id: DeviceId, query: DeviceSetQuery) {
+        let i = self.lookup(id);
+        match query {
+            DeviceSetQuery::Pos(pos) => match id {
+                DeviceId::Router(_) => self.routers[i].attributes.pos = pos,
+                DeviceId::Switch(_) => self.switches[i].attributes.pos = pos,
+                DeviceId::Desktop(_) => self.desktops[i].attributes.pos = pos,
+            },
+            DeviceSetQuery::Connect(adj_id, self_port, adj_port) => {
+                self.connect(id, self_port, adj_id, adj_port);
+            }
+            DeviceSetQuery::Disconnect(port) => {
+                self.disconnect(id, port);
+            }
+            DeviceSetQuery::TerminalInput(input) => match id {
+                DeviceId::Router(_) => self.routers[i].input(&input),
+                DeviceId::Switch(_) => self.switches[i].input(&input),
+                DeviceId::Desktop(_) => self.desktops[i].input(&input),
+            },
+            DeviceSetQuery::Delete => match id {
+                DeviceId::Router(_) => self.routers[i].attributes.deleted = true,
+                DeviceId::Switch(_) => self.switches[i].attributes.deleted = true,
+                DeviceId::Desktop(_) => self.desktops[i].attributes.deleted = true,
+            },
+        }
+    }
+
+    pub fn render(&mut self, d: &mut RaylibDrawHandle) {
+        const FONT_SIZE: i32 = 10;
+        const PADDING: i32 = 10;
+
+        // Draw ethernet (adjacencies)
+        let mut set: HashSet<DeviceId> = HashSet::new(); // Only need to draw a line once per device
+        for (id, adjs) in self.adj_devices.iter() {
+            let c = self.get(DeviceGetQuery::Id(*id)).unwrap();
+            let i = self.lookup(*id);
+
+            for (port, adj_id, _) in adjs {
+                let target = self.get(DeviceGetQuery::Id(*adj_id)).unwrap();
+                let start_pos = Vector2::new(c.pos.x, c.pos.y);
+                let end_pos = Vector2::new(target.pos.x, target.pos.y);
+                if !set.contains(adj_id) {
+                    d.draw_line_ex(start_pos, end_pos, 2.5, Color::RAYWHITE);
+                }
+                set.insert(*id);
+
+                let is_port_up = match id {
+                    DeviceId::Switch(_) => self.switches[i].device.is_port_up(*port),
+                    DeviceId::Router(_) => self.routers[i].device.is_port_up(*port),
+                    _ => true,
+                };
+
+                let dir_e = (end_pos - start_pos).normalized();
+                d.draw_circle(
+                    (c.pos.x + dir_e.x * 35.0) as i32,
+                    (c.pos.y + dir_e.y * 35.0) as i32,
+                    5.0,
+                    if is_port_up {
+                        Color::LIMEGREEN
+                    } else {
+                        Color::RED
+                    },
+                );
             }
         }
 
-        for p in self.packets.iter_mut() {
-            p.tick();
+        for component in &mut self.routers {
+            d.draw_circle(
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                ROUTER_DISPLAY_RADIUS + 2.0,
+                Color::WHITE,
+            );
+
+            d.draw_circle(
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                ROUTER_DISPLAY_RADIUS,
+                Color::BLACK,
+            );
+
+            utils::draw_icon(
+                GuiIconName::ICON_SHUFFLE_FILL,
+                (component.attributes.pos.x - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
+                (component.attributes.pos.y - (ROUTER_DISPLAY_RADIUS / 1.5)) as i32,
+                2,
+                Color::WHITE,
+            );
+
+            d.draw_text(
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32
+                    - d.measure_text(&component.attributes.label, FONT_SIZE) / 2,
+                (component.attributes.pos.y + ROUTER_DISPLAY_RADIUS) as i32 + PADDING,
+                FONT_SIZE,
+                Color::WHITE,
+            );
         }
 
-        for id in lazy_delete.iter() {
-            // Remove adjacencies
-            for (port, _, _) in self.adj_devices.get(id).unwrap().clone() {
-                self.disconnect(*id, port);
+        for component in &mut self.switches {
+            d.draw_rectangle(
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                SWITCH_DISPLAY_LENGTH,
+                SWITCH_DISPLAY_LENGTH,
+                Color::BLACK,
+            );
+            d.draw_rectangle_lines(
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                SWITCH_DISPLAY_LENGTH,
+                SWITCH_DISPLAY_LENGTH,
+                Color::WHITE,
+            );
+
+            utils::draw_icon(
+                GuiIconName::ICON_CURSOR_SCALE_FILL,
+                component.attributes.pos.x as i32 + (SWITCH_DISPLAY_LENGTH / 6),
+                component.attributes.pos.y as i32 + (SWITCH_DISPLAY_LENGTH / 6),
+                2,
+                Color::WHITE,
+            );
+
+            d.draw_text(
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32 + SWITCH_DISPLAY_LENGTH + PADDING,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+        }
+
+        for component in &mut self.desktops {
+            d.draw_rectangle(
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                DESKTOP_DISPLAY_SIZE,
+                DESKTOP_DISPLAY_SIZE,
+                Color::BLACK,
+            );
+
+            utils::draw_icon(
+                GuiIconName::ICON_MONITOR,
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32,
+                3,
+                Color::WHITE,
+            );
+
+            d.draw_text(
+                component.attributes.label.as_str(),
+                component.attributes.pos.x as i32,
+                component.attributes.pos.y as i32 + 5 * PADDING,
+                FONT_SIZE,
+                Color::WHITE,
+            );
+        }
+    }
+
+    pub fn update(&mut self) {
+        let mut delete = Vec::<DeviceId>::new();
+
+        for component in &mut self.routers {
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.device.tick();
+            }
+        }
+
+        for component in &mut self.switches {
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.device.tick();
+            }
+        }
+
+        for component in &mut self.desktops {
+            if component.attributes.deleted {
+                delete.push(component.attributes.id);
+            } else {
+                component.tick();
+            }
+        }
+
+        for id in delete {
+            let devices = self.adj_devices.get(&id).cloned();
+            if let Some(devices) = devices {
+                for (port, _, _) in devices {
+                    self.disconnect(id, port);
+                }
             }
 
-            let i = self.lookup.remove(id).expect("Device already removed");
-            self.adj_devices.remove(id).expect("Device already removed");
+            let i = self.lookup(id);
+            self.adj_devices.remove(&id);
+            self.lookup.remove(&id.as_u64());
 
             // Remove from entity list and sim
-            match *id {
+            match id {
                 DeviceId::Desktop(_) => {
-                    self.cable_sim
-                        .remove(self.desktops[i].desktop.interface.ethernet.port());
+                    self.cable_simulator
+                        .remove(self.desktops[i].device.interface.ethernet.port());
                     self.desktops.swap_remove(i);
 
                     if i < self.desktops.len() {
-                        self.lookup.insert(self.desktops[i].id, i);
+                        self.lookup
+                            .insert(self.desktops[i].attributes.id.as_u64(), i);
                     }
                 }
                 DeviceId::Switch(_) => {
-                    self.cable_sim.removes(self.switches[i].switch.ports());
+                    self.cable_simulator
+                        .removes(self.switches[i].device.ports());
                     self.switches.swap_remove(i);
 
                     if i < self.switches.len() {
-                        self.lookup.insert(self.switches[i].id, i);
+                        self.lookup
+                            .insert(self.switches[i].attributes.id.as_u64(), i);
                     }
                 }
                 DeviceId::Router(_) => {
-                    self.cable_sim.removes(self.routers[i].router.ports());
+                    self.cable_simulator.removes(self.routers[i].device.ports());
                     self.routers.swap_remove(i);
 
                     if i < self.routers.len() {
-                        self.lookup.insert(self.routers[i].id, i);
+                        self.lookup
+                            .insert(self.routers[i].attributes.id.as_u64(), i);
                     }
                 }
             }
         }
 
-        if tick_devices {
-            self.cable_sim.tick();
-        }
+        self.cable_simulator.tick();
     }
 
-    pub fn render(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
-        for e in self.iter() {
-            e.render(d);
+    pub fn sniff(
+        &self,
+    ) -> Vec<(
+        DeviceId,
+        (
+            (Option<DeviceId>, Vec<PacketKind>),
+            (Option<DeviceId>, Vec<PacketKind>),
+        ),
+    )> {
+        let mut values = Vec::new();
+        for component in &self.routers {
+            for (i, port) in component.device.ports().iter().enumerate() {
+                let (incoming, outgoing) = port.borrow().sniff();
+                if incoming.is_empty() && outgoing.is_empty() {
+                    continue;
+                }
+
+                let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                    incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                );
+
+                let adj = self
+                    .adj_devices
+                    .get(&component.attributes.id)
+                    .and_then(|adjs| {
+                        adjs.iter()
+                            .find(|(p, _, _)| *p == i)
+                            .map(|(_, adj, _)| *adj)
+                    });
+                values.push((
+                    component.attributes.id,
+                    ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+                ));
+            }
         }
 
-        for p in self.packets.iter() {
-            p.render(d); // render packets on top of devices
+        for component in &self.switches {
+            for (i, port) in component.device.ports().iter().enumerate() {
+                let (incoming, outgoing) = port.borrow().sniff();
+
+                if incoming.is_empty() && outgoing.is_empty() {
+                    continue;
+                }
+
+                let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                    incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                    outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                );
+
+                let adj = self
+                    .adj_devices
+                    .get(&component.attributes.id)
+                    .and_then(|adjs| {
+                        adjs.iter()
+                            .find(|(p, _, _)| *p == i)
+                            .map(|(_, adj, _)| *adj)
+                    });
+                values.push((
+                    component.attributes.id,
+                    ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+                ));
+            }
         }
 
-        let mut selected_window: Option<&mut dyn Device> = None;
-        for e in self.iter_mut() {
-            if s.selected_window == Some(e.id()) {
-                selected_window = Some(e);
+        for component in &self.desktops {
+            let (incoming, outgoing) = component.device.interface.ethernet.port().borrow().sniff();
+            if incoming.is_empty() && outgoing.is_empty() {
                 continue;
             }
-            e.render_gui(d, s);
+
+            let (incoming_packet_kinds, outgoing_packet_kinds) = (
+                incoming.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+                outgoing.iter().map(|p| PacketKind::from_bytes(p)).collect(),
+            );
+
+            let adj = self
+                .adj_devices
+                .get(&component.attributes.id)
+                .and_then(|adjs| adjs.first().map(|(_, adj, _)| *adj));
+
+            values.push((
+                component.attributes.id,
+                ((adj, incoming_packet_kinds), (adj, outgoing_packet_kinds)),
+            ))
         }
 
-        // Selected window is on top
-        if let Some(e) = selected_window {
-            e.render_gui(d, s);
-        }
+        values
     }
 
-    pub fn disconnect(&mut self, id: DeviceId, port: usize) {
-        fn _dc(ds: &mut Devices, id: DeviceId, i: usize, port: usize) {
-            match id {
-                DeviceId::Desktop(_) => {
-                    ds.desktops[i].desktop.interface.disconnect();
-                }
-                DeviceId::Switch(_) => {
-                    ds.switches[i].switch.disconnect(port);
-                }
-                DeviceId::Router(_) => {
-                    ds.routers[i].router.disconnect(port);
-                }
-            }
-        }
-
-        let e1_id = id;
-        let e1_adjacency = {
-            let adj_list = self.adj_devices.get(&e1_id);
-            adj_list.and_then(|adj| adj.iter().find(|(p, _, _)| *p == port).cloned())
-        };
-
-        if let Some((e1_port, e2_id, e2_port)) = e1_adjacency {
-            if let Some(adj) = self.adj_devices.get_mut(&e1_id) {
-                adj.retain(|(p, _, _)| *p != e1_port);
-            }
-            if let Some(adj) = self.adj_devices.get_mut(&e2_id) {
-                adj.retain(|(p, _, _)| *p != e2_port);
-            }
-
-            _dc(self, e1_id, *self.lookup.get(&e1_id).unwrap(), e1_port);
-            _dc(self, e2_id, *self.lookup.get(&e2_id).unwrap(), e2_port);
-            return;
-        }
+    fn lookup(&self, id: DeviceId) -> usize {
+        *self.lookup.get(&id.as_u64()).expect("Bad lookup")
     }
 
-    pub fn connect(&mut self, e1: DeviceId, p1: usize, e2: DeviceId, p2: usize) {
-        if e1 == e2 {
+    fn connect(&mut self, d1: DeviceId, p1: usize, d2: DeviceId, p2: usize) {
+        if d1 == d2 {
             return;
         }
 
-        self.disconnect(e1, p1);
-        self.disconnect(e2, p2);
+        self.disconnect(d1, p1);
+        self.disconnect(d2, p2);
 
-        let e1_i = *self.lookup.get(&e1).unwrap();
-        let e2_i = *self.lookup.get(&e2).unwrap();
+        let (d1_i, d2_i) = (self.lookup(d1), self.lookup(d2));
 
-        fn connect_desktop_entity(
-            ds: &mut Devices,
-            e_i: usize,
+        fn connect_desktop(
+            dr: &mut DeviceRepository,
+            d_i: usize,
             other_port: usize,
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let e = &mut ds.desktops[e_i];
+            let component = &mut dr.desktops[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
                     EthernetPort::connect(
-                        &mut e.desktop.interface.ethernet.port(),
-                        &mut ds.desktops[other_i].desktop.interface.ethernet.port(),
+                        &component.device.interface.ethernet.port(),
+                        &dr.desktops[other_i].device.interface.ethernet.port(),
                     );
                 }
                 DeviceId::Switch(_) => {
-                    ds.switches[other_i]
-                        .switch
-                        .connect(other_port, &mut e.desktop.interface.ethernet);
+                    dr.switches[other_i]
+                        .device
+                        .connect(other_port, &mut component.device.interface.ethernet);
                 }
                 DeviceId::Router(_) => {
-                    ds.routers[other_i]
-                        .router
-                        .connect(other_port, &mut e.desktop.interface);
+                    dr.routers[other_i]
+                        .device
+                        .connect(other_port, &mut component.device.interface);
                 }
             }
         }
 
-        fn connect_switch_entity(
-            ds: &mut Devices,
-            e_i: usize,
+        fn connect_switch(
+            dr: &mut DeviceRepository,
+            d_i: usize,
             port: usize,
             other_port: usize,
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let e = &mut ds.switches[e_i];
+            let component = &mut dr.switches[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
-                    e.switch
-                        .connect(port, &mut ds.desktops[other_i].desktop.interface.ethernet);
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface.ethernet);
                 }
                 DeviceId::Switch(_) => {
                     // have to call connect on the switch device so the switch hello bpdu is sent.
                     // compiler gymnastics ensue...
-                    let (e, other_switch) = if e_i < other_i {
-                        let (left, right) = ds.switches.split_at_mut(other_i);
-                        (&mut left[e_i], &mut right[0])
+                    let (component, other_component) = if d_i < other_i {
+                        let (left, right) = dr.switches.split_at_mut(other_i);
+                        (&mut left[d_i], &mut right[0])
                     } else {
-                        let (left, right) = ds.switches.split_at_mut(e_i);
+                        let (left, right) = dr.switches.split_at_mut(d_i);
                         (&mut right[0], &mut left[other_i])
                     };
 
-                    e.switch
-                        .connect_switch(port, &mut other_switch.switch, other_port);
+                    component
+                        .device
+                        .connect_switch(port, &mut other_component.device, other_port);
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut e.switch.ports()[port],
-                        &mut ds.routers[other_i].router.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
         }
 
-        fn connect_router_entity(
-            ds: &mut Devices,
-            e_i: usize,
+        fn connect_router(
+            dr: &mut DeviceRepository,
+            d_i: usize,
             port: usize,
             other_port: usize,
             other_id: DeviceId,
             other_i: usize,
         ) {
-            let e = &mut ds.routers[e_i];
+            let component = &mut dr.routers[d_i];
             match other_id {
                 DeviceId::Desktop(_) => {
-                    e.router
-                        .connect(port, &mut ds.desktops[other_i].desktop.interface);
+                    component
+                        .device
+                        .connect(port, &mut dr.desktops[other_i].device.interface);
                 }
                 DeviceId::Switch(_) => {
                     EthernetPort::connect(
-                        &mut e.router.ports()[port],
-                        &mut ds.switches[other_i].switch.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.switches[other_i].device.ports()[other_port],
                     );
                 }
                 DeviceId::Router(_) => {
                     EthernetPort::connect(
-                        &mut e.router.ports()[port],
-                        &mut ds.routers[other_i].router.ports()[other_port],
+                        &component.device.ports()[port],
+                        &dr.routers[other_i].device.ports()[other_port],
                     );
                 }
             }
         }
 
-        match e1 {
+        match d1 {
             DeviceId::Desktop(_) => {
-                connect_desktop_entity(self, e1_i, p2, e2, e2_i);
+                connect_desktop(self, d1_i, p2, d2, d2_i);
             }
             DeviceId::Switch(_) => {
-                connect_switch_entity(self, e1_i, p1, p2, e2, e2_i);
+                connect_switch(self, d1_i, p1, p2, d2, d2_i);
             }
             DeviceId::Router(_) => {
-                connect_router_entity(self, e1_i, p1, p2, e2, e2_i);
+                connect_router(self, d1_i, p1, p2, d2, d2_i);
             }
         }
 
-        self.adj_devices.get_mut(&e1).unwrap().push((p1, e2, p2));
-        self.adj_devices.get_mut(&e2).unwrap().push((p2, e1, p1));
+        self.adj_devices.entry(d1).or_default().push((p1, d2, p2));
+        self.adj_devices.entry(d2).or_default().push((p2, d1, p1));
+    }
+
+    fn disconnect(&mut self, id: DeviceId, port: usize) {
+        fn _dc(dr: &mut DeviceRepository, id: DeviceId, i: usize, port: usize) {
+            match id {
+                DeviceId::Desktop(_) => {
+                    dr.desktops[i].device.interface.disconnect();
+                }
+                DeviceId::Switch(_) => {
+                    dr.switches[i].device.disconnect(port);
+                }
+                DeviceId::Router(_) => {
+                    dr.routers[i].device.disconnect(port);
+                }
+            }
+        }
+
+        let d1_id = id;
+        let d1_adjacency = {
+            let adj_list = self.adj_devices.get(&d1_id);
+            adj_list.and_then(|adj| adj.iter().find(|(p, _, _)| *p == port).cloned())
+        };
+
+        if let Some((d1_port, d2_id, d2_port)) = d1_adjacency {
+            if let Some(adj) = self.adj_devices.get_mut(&d1_id) {
+                adj.retain(|(p, _, _)| *p != d1_port);
+            }
+            if let Some(adj) = self.adj_devices.get_mut(&d2_id) {
+                adj.retain(|(p, _, _)| *p != d2_port);
+            }
+
+            let (d1_i, d2_i) = (self.lookup(d1_id), self.lookup(d2_id));
+
+            _dc(self, d1_id, d1_i, d1_port);
+            _dc(self, d2_id, d2_i, d2_port);
+        }
     }
 }
 
-pub enum DropdownKind {
-    Edit,
-    Connections,
+type CommandFunction<T> = fn(&mut Terminal<T>, &mut T, &[&str]) -> ();
+struct Terminal<T> {
+    out_buf: VecDeque<String>,
+    dict: HashMap<String, (CommandFunction<T>, String)>,
+    awaiting_command: Option<String>,
+    timer: TickTimer<String>,
 }
 
-struct DropdownGuiState {
-    selection: i32,
-    pos: Vector2,
-    kind: DropdownKind,
-    bounds: Rectangle, // Staticly positioned, dynamically popualted; has to call first render to be set
-    scroll_index: i32,
-}
+impl<T> Terminal<T> {
+    fn new() -> Self {
+        let mut dict = HashMap::new();
 
-// Desktop Entity
-// ----------------------------------------------
-
-struct DesktopEditGuiState {
-    open: bool,
-    pos: Vector2,
-    drag_origin: Option<Vector2>,
-
-    ip_buffer: [u8; 15],
-    ip_edit_mode: bool,
-
-    subnet_buffer: [u8; 15],
-    subnet_edit_mode: bool,
-
-    default_gateway_buffer: [u8; 15],
-    default_gateway_edit_mode: bool,
-
-    cmd_line_buffer: [u8; 0xFF],
-    cmd_line_out: VecDeque<String>,
-}
-
-impl DesktopEditGuiState {
-    fn new(ip_address: [u8; 4], subnet_mask: [u8; 4]) -> Self {
-        let mut ip_buffer = [0u8; 15];
-        let ip_string = format!(
-            "{}.{}.{}.{}",
-            ip_address[0], ip_address[1], ip_address[2], ip_address[3]
+        // Insert the help command into the dictionary
+        dict.insert(
+            "help".to_string(),
+            (
+                Self::help as CommandFunction<T>,
+                "Prints this help message".to_string(),
+            ),
         );
-        let ip_bytes = ip_string.as_bytes();
-        ip_buffer[..ip_bytes.len()].copy_from_slice(ip_bytes);
 
-        let mut subnet_buffer = [0u8; 15];
-        let subnet_string = format!(
-            "{}.{}.{}.{}",
-            subnet_mask[0], subnet_mask[1], subnet_mask[2], subnet_mask[3]
+        dict.insert(
+            "clear".to_string(),
+            (
+                Self::clear as CommandFunction<T>,
+                "Clear the terminal screen".to_string(),
+            ),
         );
-        let subnet_bytes = subnet_string.as_bytes();
-        subnet_buffer[..subnet_bytes.len()].copy_from_slice(subnet_bytes);
 
         Self {
-            open: false,
-            pos: Vector2::zero(),
-            drag_origin: None,
-            ip_buffer,
-            ip_edit_mode: false,
-            subnet_buffer,
-            subnet_edit_mode: false,
-            default_gateway_buffer: [0u8; 15],
-            default_gateway_edit_mode: false,
-            cmd_line_buffer: [0u8; 0xFF],
-            cmd_line_out: VecDeque::new(),
+            out_buf: VecDeque::new(),
+            dict,
+            awaiting_command: None,
+            timer: TickTimer::default(),
         }
     }
 
-    pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 300.0, 230.0)
+    fn help(term: &mut Terminal<T>, _device: &mut T, _args: &[&str]) {
+        for (cmd, (_, manual)) in term.dict.iter() {
+            term.out_buf.push_back(format!("{}: {}", cmd, manual));
+        }
     }
 
-    pub fn tab_bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
+    fn clear(term: &mut Terminal<T>, _device: &mut T, _args: &[&str]) {
+        // append a bunch of newlines to clear the terminal
+        for _ in 0..100 {
+            term.out_buf.push_back("".to_string());
+        }
+    }
+
+    fn execute(&mut self, device: &mut T, input: &str) {
+        if input.is_empty() {
+            return;
+        }
+
+        let mut args = input.split_whitespace();
+        let cmd = args.next().unwrap_or_default();
+
+        if let Some((func, _)) = self.dict.get(cmd) {
+            func(self, device, &args.collect::<Vec<&str>>());
+        } else {
+            self.out_buf
+                .push_back(format!("Error: '{}' is not a valid command", cmd));
+        }
     }
 }
 
-pub struct DesktopDevice {
-    id: DeviceId,
-    desktop: Desktop,
-
-    pos: Vector2,
-    label: String,
-
-    dropdown_gui: Option<DropdownGuiState>,
-
-    terminal: DesktopTerminal,
-    edit_gui: DesktopEditGuiState,
-
-    deleted: bool,
-}
-
-impl Entity for DesktopDevice {
-    fn pos(&self) -> Vector2 {
-        self.pos
-    }
-
-    fn set_pos(&mut self, pos: Vector2) {
-        self.pos = pos;
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.deleted
-    }
-
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.pos.x - 25.0, self.pos.y - 25.0, 50.0, 50.0)
-    }
-
-    fn render(&self, d: &mut RaylibDrawHandle) {
-        utils::draw_icon(
-            GuiIconName::ICON_MONITOR,
-            self.pos.x as i32 - 25,
-            self.pos.y as i32 - 25,
-            3,
-            Color::WHITE,
+impl Terminal<Router> {
+    fn new_router() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "enable".to_string(),
+            (
+                Self::enable as CommandFunction<Router>,
+                "Enable a port. Usage: enable <port> <ip> <subnet>".to_string(),
+            ),
         );
 
-        d.draw_text(
-            &self.label,
-            (self.pos.x - 32.0) as i32,
-            (self.pos.y + 25.0) as i32,
-            15,
-            Color::WHITE,
+        term.dict.insert(
+            "rip".to_string(),
+            (
+                Self::rip as CommandFunction<Router>,
+                "Enable or disable RIP. Usage: rip <port>".to_string(),
+            ),
         );
-    }
-}
 
-impl Device for DesktopDevice {
-    fn id(&self) -> DeviceId {
-        self.id
-    }
+        term.dict.insert(
+            "routes".to_string(),
+            (
+                Self::routes as CommandFunction<Router>,
+                "Print the routing table".to_string(),
+            ),
+        );
 
-    fn mac_addr(&self, _: usize) -> MacAddress {
-        self.desktop.interface.ethernet.mac_address
-    }
+        term.dict.insert(
+            "ipconfig".to_string(),
+            (
+                Self::ifconfig as CommandFunction<Router>,
+                "Print the current IP configuration of the router".to_string(),
+            ),
+        );
 
-    fn label(&self) -> String {
-        self.label.clone()
-    }
-
-    fn gui_bounds(&self) -> Rectangle {
-        self.edit_gui.bounds()
-    }
-
-    fn is_port_up(&self, _: usize) -> bool {
-        true // desktop physical ports are always up (for now)
+        term
     }
 
-    fn sniff(&self, _: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        self.desktop.interface.ethernet.port().borrow().sniff()
-    }
-
-    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
-        self.dropdown_gui = Some(DropdownGuiState {
-            selection: -1,
-            pos,
-            kind,
-            bounds: Rectangle::new(pos.x, pos.y, 75.0, 16.0), // Contains at least one option
-            scroll_index: 0,
-        });
-        s.open_dropdown = Some(self.id);
-    }
-
-    /// Returns true if some poppable state is open
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
-        let mut render_display = |ds: &mut DesktopEditGuiState, d: &mut RaylibDrawHandle| {
-            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
-                && ds
-                    .bounds()
-                    .check_collision_point_rec(d.get_mouse_position())
-            {
-                s.selected_window = Some(self.id); // Window engaged
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
-            }
-
-            if d.gui_window_box(
-                ds.bounds(),
-                Some(utils::rstr_from_string(self.label.clone()).as_c_str()),
-            ) {
-                return true;
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-            }
-
-            // Configure IP
-            //----------------------------------------------
-            d.gui_label(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 30.0, 100.0, 20.0),
-                Some(rstr!("IP Address")),
-            );
-
-            if d.gui_text_box(
-                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 30.0, 150.0, 20.0),
-                &mut ds.ip_buffer,
-                ds.ip_edit_mode,
-            ) {
-                ds.ip_edit_mode = !ds.ip_edit_mode;
-                match utils::array_to_string(&ds.ip_buffer).parse::<std::net::Ipv4Addr>() {
-                    Ok(ip) => {
-                        self.desktop.interface.ip_address = ip.octets();
-                    }
-                    _ => {}
-                }
-            }
-            //----------------------------------------------
-
-            // Configure Subnet Mask
-            //----------------------------------------------
-            d.gui_label(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 60.0, 100.0, 20.0),
-                Some(rstr!("Subnet Mask")),
-            );
-
-            if d.gui_text_box(
-                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 60.0, 150.0, 20.0),
-                &mut ds.subnet_buffer,
-                ds.subnet_edit_mode,
-            ) {
-                ds.subnet_edit_mode = !ds.subnet_edit_mode;
-                match utils::array_to_string(&ds.ip_buffer).parse::<std::net::Ipv4Addr>() {
-                    Ok(ip) => {
-                        self.desktop.interface.subnet_mask = ip.octets();
-                    }
-                    _ => {}
-                }
-            }
-            //----------------------------------------------
-
-            // Configure Default Gateway
-            //----------------------------------------------
-            d.gui_label(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 90.0, 100.0, 20.0),
-                Some(rstr!("Default Gateway")),
-            );
-
-            if d.gui_text_box(
-                Rectangle::new(ds.pos.x + 120.0, ds.pos.y + 90.0, 150.0, 20.0),
-                &mut ds.default_gateway_buffer,
-                ds.default_gateway_edit_mode,
-            ) {
-                ds.default_gateway_edit_mode = !ds.default_gateway_edit_mode;
-                match utils::array_to_string(&ds.default_gateway_buffer)
-                    .parse::<std::net::Ipv4Addr>()
-                {
-                    Ok(ip) => {
-                        self.desktop.interface.default_gateway = Some(ip.octets());
-                    }
-                    _ => {}
-                }
-            }
-            //----------------------------------------------
-
-            // Command Line
-            //----------------------------------------------
-            let terminal_starting_y = ds.pos.y + 115.0;
-            d.draw_rectangle_rec(
-                Rectangle::new(ds.pos.x + 10.0, terminal_starting_y, 280.0, 105.0),
-                Color::BLACK,
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            let out_starting_y = terminal_starting_y + 8.0;
-            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + out_starting_y;
-            if !self.terminal.channel_open {
-                d.draw_text(
-                    "Desktop %",
-                    ds.pos.x as i32 + 15,
-                    out_y as i32,
-                    10,
-                    Color::WHITE,
-                );
-            }
-
-            if !self.terminal.channel_open
-                && d.gui_text_box(
-                    Rectangle::new(ds.pos.x + 70.0, out_y - 5.0, 210.0, 20.0),
-                    &mut ds.cmd_line_buffer,
-                    !ds.ip_edit_mode
-                        && !ds.subnet_edit_mode
-                        && !ds.default_gateway_edit_mode
-                        && s.selected_window == Some(self.id),
-                )
-                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
-            {
-                self.terminal.input(
-                    utils::array_to_string(&ds.cmd_line_buffer),
-                    &mut self.desktop,
-                );
-                ds.cmd_line_out.push_back(format!(
-                    "Desktop % {}",
-                    utils::array_to_string(&ds.cmd_line_buffer)
-                ));
-
-                if ds.cmd_line_out.len() > 8 {
-                    ds.cmd_line_out.pop_front();
-                }
-                ds.cmd_line_buffer = [0u8; 0xFF];
-            }
-            d.gui_load_style_default();
-
-            // Output
-            if let Some(out) = self.terminal.out() {
-                ds.cmd_line_out.push_back(out);
-            }
-
-            let mut out_y = out_starting_y;
-            for line in ds.cmd_line_out.iter().rev().take(7).rev() {
-                d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
-                out_y += 11.0;
-            }
-            //----------------------------------------------
-            return false;
-        };
-
-        if self.dropdown_gui.is_some() {
-            let ds = self.dropdown_gui.as_mut().unwrap();
-            match ds.kind {
-                DropdownKind::Edit => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(rstr!("Edit;Delete")),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-                DropdownKind::Connections => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 32.5);
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(rstr!("Ethernet0/1")),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-            }
+    fn enable(term: &mut Terminal<Router>, router: &mut Router, args: &[&str]) {
+        if args.len() != 3 {
+            term.out_buf
+                .push_back("Usage: enable <port> <ip> <subnet>".to_string());
+            return;
         }
 
-        if self.edit_gui.open {
-            if render_display(&mut self.edit_gui, d) {
-                s.open_windows.retain(|id| *id != self.id);
-                self.edit_gui.open = false;
+        let port = match args[0].parse::<usize>() {
+            Ok(port) => port,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid port", args[0]));
                 return;
-            }
-
-            if self.edit_gui.drag_origin.is_some()
-                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
-            {
-                self.edit_gui.drag_origin = None;
-                return;
-            }
-
-            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-                if self.edit_gui.drag_origin.is_none()
-                    && self
-                        .edit_gui
-                        .tab_bounds()
-                        .check_collision_point_rec(d.get_mouse_position())
-                {
-                    self.edit_gui.drag_origin = Some(d.get_mouse_position() - self.edit_gui.pos);
-                }
-
-                if self.edit_gui.drag_origin.is_some() {
-                    self.edit_gui.pos = d.get_mouse_position() - self.edit_gui.drag_origin.unwrap();
-                }
-            }
-        }
-    }
-
-    /// Returns true if the click should be propogated to the sim
-    fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
-        let mut handle_edit = |ds: &DropdownGuiState, rl: &RaylibHandle| {
-            // Handle dropdown clicked
-            match ds.selection {
-                // Edit
-                0 => {
-                    self.edit_gui.open = true;
-                    self.edit_gui.pos = rl.get_mouse_position();
-                    s.open_windows.push(self.id);
-                    return true;
-                }
-                // Delete
-                1 => {
-                    self.deleted = true;
-                    return true;
-                }
-                _ => {
-                    return false;
-                }
             }
         };
 
-        let mut handle_connections = |ds: &DropdownGuiState| {
-            // Handle dropdown clicked
-            match ds.selection {
-                // Ethernet0/1
-                0 => {
-                    match s.mode {
-                        GuiMode::Connect => {
-                            if s.connect_d1.is_none() {
-                                s.connect_d1 = Some((0, self.id));
-                            } else {
-                                s.connect_d2 = Some((0, self.id));
-                            }
+        let ip = match args[1].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[1]));
+                return;
+            }
+        };
+
+        let subnet = match args[2].parse::<std::net::Ipv4Addr>() {
+            Ok(subnet) => subnet,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid subnet mask", args[2]));
+                return;
+            }
+        };
+
+        router.enable_interface(port, ip.octets(), subnet.octets());
+        term.out_buf.push_back(format!(
+            "Port {} enabled with IP {} and subnet mask {}",
+            port, ip, subnet
+        ));
+    }
+
+    fn rip(term: &mut Terminal<Router>, router: &mut Router, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf.push_back("Usage: rip <port>".to_string());
+            return;
+        }
+
+        let port = match args[0].parse::<usize>() {
+            Ok(port) => port,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid port", args[0]));
+                return;
+            }
+        };
+
+        match router.enable_rip(port) {
+            Ok(_) => {
+                term.out_buf
+                    .push_back(format!("RIP enabled on port {}", port));
+            }
+            Err(e) => {
+                term.out_buf.push_back(format!("Error: {}", e));
+            }
+        }
+    }
+
+    fn routes(term: &mut Terminal<Router>, router: &mut Router, _args: &[&str]) {
+        term.out_buf.push_back("Routing Table:".to_string());
+
+        for (key, route) in router.routing_table().iter() {
+            term.out_buf.push_back(format!(
+                "{} -> {} via port {}",
+                ipv4_fmt!(key),
+                ipv4_fmt!(route.ip_address),
+                route.port
+            ));
+        }
+    }
+
+    fn ifconfig(term: &mut Terminal<Router>, router: &mut Router, _args: &[&str]) {
+        term.out_buf.push_back("IP Configuration:".to_string());
+
+        for (ip, subnet, port, enabled, rip_enabled) in router.interface_config().iter() {
+            term.out_buf.push_back(format!(
+                "Port {}: IP: {}, Subnet: {}, Enabled: {}, RIP: {}",
+                port,
+                ipv4_fmt!(ip),
+                ipv4_fmt!(subnet),
+                enabled,
+                rip_enabled
+            ));
+        }
+    }
+}
+
+impl Terminal<Switch> {
+    fn new_switch() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "stp".to_string(),
+            (
+                Self::stp as CommandFunction<Switch>,
+                "Enable or disable Spanning Tree Protocol. Usage: stp <priority>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "table".to_string(),
+            (
+                Self::table as CommandFunction<Switch>,
+                "Print the MAC address table".to_string(),
+            ),
+        );
+
+        term
+    }
+
+    fn stp(term: &mut Terminal<Switch>, switch: &mut Switch, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf.push_back("Usage: stp <priority>".to_string());
+            return;
+        }
+
+        let priority = match args[0].parse::<u16>() {
+            Ok(priority) => priority,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid priority", args[0]));
+                return;
+            }
+        };
+
+        switch.set_bridge_priority(priority);
+        switch.init_stp();
+        term.out_buf.push_back(format!(
+            "Spanning Tree Protocol priority set to {}",
+            priority
+        ));
+    }
+
+    fn table(term: &mut Terminal<Switch>, switch: &mut Switch, _args: &[&str]) {
+        term.out_buf.push_back("MAC Address Table:".to_string());
+        for (mac, port) in switch.mac_table().iter() {
+            term.out_buf
+                .push_back(format!("{} -> Port {}", mac_fmt!(mac), port));
+        }
+    }
+}
+
+impl Terminal<Desktop> {
+    fn new_desktop() -> Self {
+        let mut term = Self::new();
+        term.dict.insert(
+            "ipset".to_string(),
+            (
+                Self::ipset as CommandFunction<Desktop>,
+                "Set the IP address of the desktop. Usage: ipset <ipv4 addr> <subnet addr>"
+                    .to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "dgateway".to_string(),
+            (
+                Self::dgateway as CommandFunction<Desktop>,
+                "Set the default gateway of the desktop. Usage: dgateway <ipv4 addr>".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "ipconfig".to_string(),
+            (
+                Self::ipconfig as CommandFunction<Desktop>,
+                "Print the current IP configuration of the desktop".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "arptab".to_string(),
+            (
+                Self::arptab as CommandFunction<Desktop>,
+                "Print the ARP table".to_string(),
+            ),
+        );
+
+        term.dict.insert(
+            "ping".to_string(),
+            (
+                Self::ping as CommandFunction<Desktop>,
+                "Ping an IP address. Usage: ping <ipv4 addr>".to_string(),
+            ),
+        );
+
+        term
+    }
+
+    fn ipset(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 2 {
+            term.out_buf
+                .push_back("Usage: ipset <ipv4 addr> <subnet mask>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        let subnet = match args[1].parse::<std::net::Ipv4Addr>() {
+            Ok(subnet) => subnet,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid subnet mask", args[1]));
+                return;
+            }
+        };
+
+        desktop.interface.ip_address = ip.octets();
+        desktop.interface.subnet_mask = subnet.octets();
+
+        term.out_buf.push_back(format!(
+            "IP address set to {} with subnet mask {}",
+            ip, subnet
+        ));
+    }
+
+    fn dgateway(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf
+                .push_back("Usage: dgateway <ipv4 addr>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        desktop.interface.default_gateway = Some(ip.octets());
+
+        term.out_buf
+            .push_back(format!("Default gateway set to {}", ip));
+    }
+
+    fn ipconfig(term: &mut Terminal<Desktop>, desktop: &mut Desktop, _args: &[&str]) {
+        term.out_buf.push_back(format!(
+            "IP Address: {}",
+            ipv4_fmt!(desktop.interface.ip_address)
+        ));
+
+        term.out_buf.push_back(format!(
+            "Subnet Mask: {}",
+            ipv4_fmt!(desktop.interface.subnet_mask)
+        ));
+        if let Some(gateway) = desktop.interface.default_gateway {
+            term.out_buf
+                .push_back(format!("Default Gateway: {}", ipv4_fmt!(gateway)));
+        } else {
+            term.out_buf.push_back("Default Gateway: None".to_string());
+        }
+
+        let mac = desktop.interface.ethernet.mac_address;
+        term.out_buf
+            .push_back(format!("MAC Address: {}", mac_fmt!(mac)));
+    }
+
+    fn arptab(term: &mut Terminal<Desktop>, desktop: &mut Desktop, _args: &[&str]) {
+        term.out_buf.push_back("ARP Table:".to_string());
+        for (ip, mac) in desktop.interface.arp_table().iter() {
+            term.out_buf
+                .push_back(format!("{} -> {}", ipv4_fmt!(ip), mac_fmt!(mac)));
+        }
+    }
+
+    fn ping(term: &mut Terminal<Desktop>, desktop: &mut Desktop, args: &[&str]) {
+        if args.len() != 1 {
+            term.out_buf
+                .push_back("Usage: ping <ipv4 addr>".to_string());
+            return;
+        }
+
+        let ip = match args[0].parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                term.out_buf
+                    .push_back(format!("Error: '{}' is not a valid IPv4 address", args[0]));
+                return;
+            }
+        };
+
+        match desktop
+            .interface
+            .send_icmp(ip.octets(), IcmpType::EchoRequest)
+        {
+            Ok(_) => {
+                term.out_buf.push_back(format!("Pinging {}...", ip));
+                term.awaiting_command = Some("ping".to_string());
+                term.timer.schedule("ping".to_string(), 3, false);
+            }
+            Err(e) => {
+                term.out_buf.push_back(format!("Error: {}", e));
+            }
+        };
+    }
+
+    fn tick(&mut self, desktop: &mut Desktop) {
+        if self.awaiting_command.is_none() {
+            self.timer.tick();
+            return;
+        }
+
+        for event in self.timer.ready() {
+            self.out_buf.push_back(format!("'{}' timed out.", event));
+            self.awaiting_command = None;
+        }
+
+        self.timer.tick();
+
+        if let Some("ping") = self.awaiting_command.as_deref() {
+            // Manually tick a desktop device. Find an ICMP reply frame to close the channel.
+            for frame in desktop.interface.receive() {
+                if frame.destination != desktop.interface.ip_address {
+                    continue;
+                }
+
+                if frame.protocol == 1 {
+                    let icmp = match IcmpFrame::from_bytes(frame.data) {
+                        Ok(icmp) => icmp,
+                        Err(_) => {
+                            continue;
                         }
-                        GuiMode::Detach => {
-                            s.detach_d = Some((0, self.id));
-                        }
-                        _ => {}
-                    }
+                    };
 
-                    return true;
-                }
-                _ => {
-                    return false;
-                }
-            }
-        };
-
-        if let Some(ds) = &self.dropdown_gui {
-            let close = match ds.kind {
-                DropdownKind::Edit => handle_edit(ds, rl),
-                DropdownKind::Connections => handle_connections(ds),
-            };
-
-            if close {
-                s.open_dropdown = None;
-                self.dropdown_gui = None;
-                return false;
-            }
-
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                let mouse_pos = rl.get_mouse_position();
-                if !ds.bounds.check_collision_point_rec(mouse_pos) {
-                    s.open_dropdown = None;
-                    self.dropdown_gui = None;
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn traffic(&self, _: Vec<usize>) -> Vec<(usize, bool)> {
-        let port = self.desktop.interface.ethernet.port();
-        let mut res = vec![];
-        if port.borrow().has_outgoing() {
-            res.push((0, false));
-        }
-        if port.borrow().has_incoming() {
-            res.push((0, true));
-        }
-        res
-    }
-}
-
-impl Tickable for DesktopDevice {
-    fn tick(&mut self) {
-        self.terminal.tick(&mut self.desktop);
-        self.desktop.tick();
-    }
-}
-
-impl Storable for DesktopDevice {
-    fn store(ds: &mut Devices, pos: Vector2) {
-        let id = DeviceId::Desktop(ds.next_id_seed());
-        ds.lookup.insert(id, ds.desktops.len());
-        ds.adj_devices.insert(id, Vec::new());
-        ds.desktops.push(DesktopDevice {
-            id,
-            desktop: Desktop::from_seed(id.as_u32() as u64),
-            pos,
-            label: format!("Desktop {}", ds.desktop_count),
-            dropdown_gui: None,
-            terminal: DesktopTerminal::default(),
-            edit_gui: DesktopEditGuiState::new([192, 168, 1, 1], [255, 255, 255, 0]),
-            deleted: false,
-        });
-
-        ds.cable_sim.add(
-            ds.desktops
-                .last()
-                .unwrap()
-                .desktop
-                .interface
-                .ethernet
-                .port(),
-        );
-        ds.desktop_count += 1;
-    }
-}
-
-// ----------------------------------------------
-
-// Switch Entity
-// ----------------------------------------------
-
-pub struct SwitchEditGuiState {
-    open: bool,
-    pos: Vector2,
-    drag_origin: Option<Vector2>,
-
-    cmd_line_buffer: [u8; 0xFF],
-    cmd_line_out: VecDeque<String>,
-}
-
-impl SwitchEditGuiState {
-    pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 300.0, 160.0)
-    }
-
-    pub fn tab_bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
-    }
-}
-
-pub struct SwitchDevice {
-    id: DeviceId,
-    switch: Switch,
-    pos: Vector2,
-    label: String,
-    deleted: bool,
-
-    dropdown_gui: Option<DropdownGuiState>,
-    edit_gui: SwitchEditGuiState,
-    terminal: SwitchTerminal,
-}
-
-impl Entity for SwitchDevice {
-    fn set_pos(&mut self, pos: Vector2) {
-        self.pos = pos;
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.deleted
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-    }
-
-    fn render(&self, d: &mut RaylibDrawHandle) {
-        let center = Vector2::new(self.pos.x - 20.0, self.pos.y - 20.0);
-        d.draw_rectangle_lines_ex(
-            Rectangle::new(center.x, center.y, 40.0, 40.0),
-            3.0,
-            Color::WHITE,
-        );
-        utils::draw_icon(
-            GuiIconName::ICON_CURSOR_SCALE_FILL,
-            center.x as i32 + 5,
-            center.y as i32 + 5,
-            2,
-            Color::WHITE,
-        );
-        d.draw_text(
-            &self.label,
-            center.x as i32 - 4,
-            center.y as i32 + 50,
-            15,
-            Color::WHITE,
-        );
-    }
-
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.pos.x - 20.0, self.pos.y - 20.0, 30.0, 40.0)
-    }
-}
-
-impl Device for SwitchDevice {
-    fn id(&self) -> DeviceId {
-        self.id
-    }
-
-    fn mac_addr(&self, port: usize) -> MacAddress {
-        self.switch.mac_addr(port)
-    }
-
-    fn label(&self) -> String {
-        self.label.clone()
-    }
-
-    fn gui_bounds(&self) -> Rectangle {
-        self.edit_gui.bounds()
-    }
-
-    fn is_port_up(&self, port: usize) -> bool {
-        !self.switch.port_state(port)
-    }
-
-    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        self.switch.ports()[port].borrow().sniff()
-    }
-
-    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
-        self.dropdown_gui = Some(DropdownGuiState {
-            selection: -1,
-            pos,
-            kind,
-            bounds: Rectangle::new(pos.x, pos.y, 75.0, 16.0), // Contains at least one option
-            scroll_index: 0,
-        });
-        s.open_dropdown = Some(self.id);
-    }
-
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
-        if self.dropdown_gui.is_some() {
-            let ds = self.dropdown_gui.as_mut().unwrap();
-            match ds.kind {
-                DropdownKind::Edit => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(rstr!("Edit;Delete")),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-                DropdownKind::Connections => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 100.0, 200.5);
-
-                    let options = self
-                        .switch
-                        .ports()
-                        .iter()
-                        .enumerate()
-                        .map(|(p, _)| format!("Ethernet0/{p}"))
-                        .collect::<Vec<String>>();
-
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(utils::rstr_from_string(options.join(";")).as_c_str()),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-            }
-        }
-
-        let mut render_display = |ds: &mut SwitchEditGuiState, d: &mut RaylibDrawHandle| {
-            // Window
-            //----------------------------------------------
-            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
-                && ds
-                    .bounds()
-                    .check_collision_point_rec(d.get_mouse_position())
-            {
-                s.selected_window = Some(self.id); // Window engaged
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
-            }
-
-            if d.gui_window_box(
-                ds.bounds(),
-                Some(utils::rstr_from_string(self.label.clone()).as_c_str()),
-            ) {
-                return true;
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-            }
-            //----------------------------------------------
-
-            // Command Line
-            //----------------------------------------------
-            d.draw_rectangle_rec(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 40.0, 280.0, 105.0),
-                Color::BLACK,
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + ds.pos.y + 53.0;
-            if !self.terminal.channel_open {
-                d.draw_text(
-                    "Switch %",
-                    ds.pos.x as i32 + 15,
-                    out_y as i32,
-                    10,
-                    Color::WHITE,
-                );
-            }
-
-            if !self.terminal.channel_open
-                && d.gui_text_box(
-                    Rectangle::new(ds.pos.x + 63.0, out_y - 5.0, 210.0, 20.0),
-                    &mut ds.cmd_line_buffer,
-                    s.selected_window == Some(self.id),
-                )
-                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
-            {
-                self.terminal.input(
-                    utils::array_to_string(&ds.cmd_line_buffer),
-                    &mut self.switch,
-                );
-                ds.cmd_line_out.push_back(format!(
-                    "Switch % {}",
-                    utils::array_to_string(&ds.cmd_line_buffer)
-                ));
-
-                if ds.cmd_line_out.len() > 8 {
-                    ds.cmd_line_out.pop_front();
-                }
-                ds.cmd_line_buffer = [0u8; 0xFF];
-            }
-            d.gui_load_style_default();
-
-            // Output
-            if let Some(out) = self.terminal.out() {
-                ds.cmd_line_out.push_back(out);
-            }
-
-            let mut out_y = ds.pos.y + 53.0;
-            for line in ds.cmd_line_out.iter().rev().take(7).rev() {
-                d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
-                if out_y > ds.pos.y + 150.0 {
-                    break;
-                }
-                out_y += 11.0;
-            }
-            //----------------------------------------------
-            return false;
-        };
-
-        if self.edit_gui.open {
-            if render_display(&mut self.edit_gui, d) {
-                s.open_windows.retain(|id| *id != self.id);
-                self.edit_gui.open = false;
-                return;
-            }
-
-            if self.edit_gui.drag_origin.is_some()
-                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
-            {
-                self.edit_gui.drag_origin = None;
-                return;
-            }
-
-            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-                if self.edit_gui.drag_origin.is_none()
-                    && self
-                        .edit_gui
-                        .tab_bounds()
-                        .check_collision_point_rec(d.get_mouse_position())
-                {
-                    self.edit_gui.drag_origin = Some(d.get_mouse_position() - self.edit_gui.pos);
-                }
-
-                if self.edit_gui.drag_origin.is_some() {
-                    self.edit_gui.pos = d.get_mouse_position() - self.edit_gui.drag_origin.unwrap();
-                }
-            }
-        }
-    }
-
-    fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
-        let mut handle_edit = |ds: &DropdownGuiState| {
-            // Handle dropdown clicked
-            match ds.selection {
-                // Edit
-                0 => {
-                    self.edit_gui.open = true;
-                    self.edit_gui.pos = rl.get_mouse_position();
-                    s.open_windows.push(self.id);
-                    return true;
-                }
-                // Delete
-                1 => {
-                    self.deleted = true;
-                    return true;
-                }
-                _ => {
-                    return false;
-                }
-            }
-        };
-
-        let mut handle_connections = |ds: &DropdownGuiState| {
-            if ds.selection == -1 {
-                return false;
-            }
-
-            let selection = ds.selection as usize;
-
-            match s.mode {
-                GuiMode::Connect => {
-                    if s.connect_d1.is_none() {
-                        s.connect_d1 = Some((selection, self.id));
-                    } else {
-                        s.connect_d2 = Some((selection, self.id));
+                    if icmp.icmp_type == IcmpType::EchoReply as u8 {
+                        self.out_buf.push_back(String::from("Pong!"));
+                        self.awaiting_command = None;
+                        return;
                     }
                 }
-                GuiMode::Detach => {
-                    s.detach_d = Some((selection, self.id));
-                }
-                _ => {}
-            }
-
-            return true;
-        };
-
-        if let Some(ds) = &self.dropdown_gui {
-            let close = match ds.kind {
-                DropdownKind::Edit => handle_edit(ds),
-                DropdownKind::Connections => handle_connections(ds),
-            };
-
-            if close {
-                s.open_dropdown = None;
-                self.dropdown_gui = None;
-                return false;
-            }
-
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                let mouse_pos = rl.get_mouse_position();
-                if !ds.bounds.check_collision_point_rec(mouse_pos) {
-                    s.open_dropdown = None;
-                    self.dropdown_gui = None;
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn traffic(&self, ports: Vec<usize>) -> Vec<(usize, bool)> {
-        let switch_ports = self.switch.ports();
-        let mut res = vec![];
-        for p in ports {
-            if switch_ports[p].borrow().has_outgoing() {
-                res.push((p, false));
-            }
-            if switch_ports[p].borrow().has_incoming() {
-                res.push((p, true));
-            }
-        }
-        res
-    }
-}
-
-impl Storable for SwitchDevice {
-    fn store(ds: &mut Devices, pos: Vector2) {
-        let id = DeviceId::Switch(ds.next_id_seed());
-        ds.seed += 32;
-
-        ds.lookup.insert(id, ds.switches.len());
-        ds.adj_devices.insert(id, Vec::new());
-        ds.switches.push(SwitchDevice {
-            id,
-            switch: Switch::from_seed(id.as_u32() as u64, 100),
-            pos,
-            label: format!("Switch {}", ds.switch_count),
-            deleted: false,
-            dropdown_gui: None,
-            terminal: SwitchTerminal::default(),
-            edit_gui: SwitchEditGuiState {
-                open: false,
-                pos: Vector2::zero(),
-                drag_origin: None,
-                cmd_line_buffer: [0u8; 0xFF],
-                cmd_line_out: VecDeque::new(),
-            },
-        });
-
-        ds.cable_sim
-            .adds(ds.switches.last().unwrap().switch.ports());
-        ds.switch_count += 1;
-    }
-}
-
-impl Tickable for SwitchDevice {
-    fn tick(&mut self) {
-        self.switch.tick();
-    }
-}
-//----------------------------------------------
-
-// Router Entity
-//----------------------------------------------
-pub struct RouterEditGuiState {
-    open: bool,
-    pos: Vector2,
-    drag_origin: Option<Vector2>,
-
-    cmd_line_buffer: [u8; 0xFF],
-    cmd_line_out: VecDeque<String>,
-}
-
-impl RouterEditGuiState {
-    pub fn bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 300.0, 160.0)
-    }
-
-    pub fn tab_bounds(&self) -> Rectangle {
-        Rectangle::new(self.pos.x, self.pos.y, 280.0, 20.0)
-    }
-}
-
-pub struct RouterDevice {
-    id: DeviceId,
-    router: Router,
-    pos: Vector2,
-    label: String,
-    deleted: bool,
-
-    dropdown_gui: Option<DropdownGuiState>,
-    edit_gui: RouterEditGuiState,
-    terminal: RouterTerminal,
-}
-
-impl Entity for RouterDevice {
-    fn set_pos(&mut self, pos: Vector2) {
-        self.pos = pos;
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.deleted
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-    }
-
-    fn render(&self, d: &mut RaylibDrawHandle) {
-        d.draw_circle_v(self.pos, 25.0, Color::WHITE);
-        d.draw_circle_v(self.pos, 23.0, Color::BLACK);
-
-        utils::draw_icon(
-            GuiIconName::ICON_SHUFFLE_FILL,
-            self.pos.x as i32 - 15,
-            self.pos.y as i32 - 15,
-            2,
-            Color::WHITE,
-        );
-        d.draw_text(
-            &self.label,
-            self.pos.x as i32 - 30,
-            self.pos.y as i32 + 30,
-            15,
-            Color::WHITE,
-        );
-    }
-
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.pos.x - 20.0, self.pos.y - 20.0, 40.0, 40.0)
-    }
-}
-
-impl Device for RouterDevice {
-    fn id(&self) -> DeviceId {
-        self.id
-    }
-
-    fn mac_addr(&self, port: usize) -> MacAddress {
-        self.router.mac_addr(port)
-    }
-
-    fn label(&self) -> String {
-        self.label.clone()
-    }
-
-    fn gui_bounds(&self) -> Rectangle {
-        self.edit_gui.bounds()
-    }
-
-    fn is_port_up(&self, port: usize) -> bool {
-        self.router.is_port_up(port)
-    }
-
-    fn sniff(&self, port: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-        self.router.ports()[port].borrow().sniff()
-    }
-
-    fn dropdown(&mut self, kind: DropdownKind, pos: Vector2, s: &mut GuiState) {
-        self.dropdown_gui = Some(DropdownGuiState {
-            selection: -1,
-            pos,
-            kind,
-            bounds: Rectangle::new(pos.x, pos.y, 75.0, 16.0), // Contains at least one option
-            scroll_index: 0,
-        });
-        s.open_dropdown = Some(self.id);
-    }
-
-    fn render_gui(&mut self, d: &mut RaylibDrawHandle, s: &mut GuiState) {
-        if self.dropdown_gui.is_some() {
-            let ds = self.dropdown_gui.as_mut().unwrap();
-            match ds.kind {
-                DropdownKind::Edit => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 75.0, 65.0);
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(rstr!("Edit;Delete")),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-                DropdownKind::Connections => {
-                    ds.bounds = Rectangle::new(ds.pos.x, ds.pos.y, 100.0, 200.5);
-
-                    let options = self
-                        .router
-                        .ports()
-                        .iter()
-                        .enumerate()
-                        .map(|(p, _)| format!("Gigabit0/{p}"))
-                        .collect::<Vec<String>>();
-
-                    d.gui_list_view(
-                        ds.bounds,
-                        Some(utils::rstr_from_string(options.join(";")).as_c_str()),
-                        &mut ds.scroll_index,
-                        &mut ds.selection,
-                    );
-                }
-            }
-        }
-
-        let mut render_display = |ds: &mut RouterEditGuiState, d: &mut RaylibDrawHandle| {
-            // Window
-            //----------------------------------------------
-            if d.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT)
-                && ds
-                    .bounds()
-                    .check_collision_point_rec(d.get_mouse_position())
-            {
-                s.selected_window = Some(self.id); // Window engaged
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_FOCUSED);
-            }
-
-            if d.gui_window_box(
-                ds.bounds(),
-                Some(utils::rstr_from_string(self.label.clone()).as_c_str()),
-            ) {
-                return true;
-            }
-
-            if s.selected_window == Some(self.id) {
-                d.gui_set_state(ffi::GuiState::STATE_NORMAL);
-            }
-            //----------------------------------------------
-
-            // Command Line
-            //----------------------------------------------
-            d.draw_rectangle_rec(
-                Rectangle::new(ds.pos.x + 10.0, ds.pos.y + 40.0, 280.0, 105.0),
-                Color::BLACK,
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_NORMAL as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BORDER_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::BASE_COLOR_PRESSED as i32,
-                Color::BLACK.color_to_int(),
-            );
-            d.gui_set_style(
-                GuiControl::TEXTBOX,
-                GuiControlProperty::TEXT_COLOR_PRESSED as i32,
-                Color::WHITE.color_to_int(),
-            );
-
-            let out_y = std::cmp::min(ds.cmd_line_out.len(), 7) as f32 * 11.0 + ds.pos.y + 53.0;
-            if !self.terminal.channel_open {
-                d.draw_text(
-                    "Router %",
-                    ds.pos.x as i32 + 15,
-                    out_y as i32,
-                    10,
-                    Color::WHITE,
-                );
-            }
-
-            if !self.terminal.channel_open
-                && d.gui_text_box(
-                    Rectangle::new(ds.pos.x + 63.0, out_y - 5.0, 210.0, 20.0),
-                    &mut ds.cmd_line_buffer,
-                    s.selected_window == Some(self.id),
-                )
-                && d.is_key_pressed(KeyboardKey::KEY_ENTER)
-            {
-                self.terminal.input(
-                    utils::array_to_string(&ds.cmd_line_buffer),
-                    &mut self.router,
-                );
-                ds.cmd_line_out.push_back(format!(
-                    "Router % {}",
-                    utils::array_to_string(&ds.cmd_line_buffer)
-                ));
-
-                if ds.cmd_line_out.len() > 8 {
-                    ds.cmd_line_out.pop_front();
-                }
-                ds.cmd_line_buffer = [0u8; 0xFF];
-            }
-            d.gui_load_style_default();
-
-            // Output
-            if let Some(out) = self.terminal.out() {
-                ds.cmd_line_out.push_back(out);
-            }
-
-            let mut out_y = ds.pos.y + 53.0;
-            for line in ds.cmd_line_out.iter().rev().take(7).rev() {
-                d.draw_text(line, ds.pos.x as i32 + 15, out_y as i32, 10, Color::WHITE);
-                if out_y > ds.pos.y + 150.0 {
-                    break;
-                }
-                out_y += 11.0;
-            }
-            //----------------------------------------------
-            return false;
-        };
-
-        if self.edit_gui.open {
-            if render_display(&mut self.edit_gui, d) {
-                s.open_windows.retain(|id| *id != self.id);
-                self.edit_gui.open = false;
-                return;
-            }
-
-            if self.edit_gui.drag_origin.is_some()
-                && d.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT)
-            {
-                self.edit_gui.drag_origin = None;
-                return;
-            }
-
-            if d.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-                if self.edit_gui.drag_origin.is_none()
-                    && self
-                        .edit_gui
-                        .tab_bounds()
-                        .check_collision_point_rec(d.get_mouse_position())
-                {
-                    self.edit_gui.drag_origin = Some(d.get_mouse_position() - self.edit_gui.pos);
-                }
-
-                if self.edit_gui.drag_origin.is_some() {
-                    self.edit_gui.pos = d.get_mouse_position() - self.edit_gui.drag_origin.unwrap();
-                }
             }
         }
     }
-
-    fn handle_gui_click(&mut self, rl: &mut RaylibHandle, s: &mut GuiState) -> bool {
-        let mut handle_edit = |ds: &DropdownGuiState| {
-            // Handle dropdown clicked
-            match ds.selection {
-                // Edit
-                0 => {
-                    self.edit_gui.open = true;
-                    self.edit_gui.pos = rl.get_mouse_position();
-                    s.open_windows.push(self.id);
-                    return true;
-                }
-                // Delete
-                1 => {
-                    self.deleted = true;
-                    return true;
-                }
-                _ => {
-                    return false;
-                }
-            }
-        };
-
-        let mut handle_connections = |ds: &DropdownGuiState| {
-            if ds.selection == -1 {
-                return false;
-            }
-
-            let selection = ds.selection as usize;
-
-            match s.mode {
-                GuiMode::Connect => {
-                    if s.connect_d1.is_none() {
-                        s.connect_d1 = Some((selection, self.id));
-                    } else {
-                        s.connect_d2 = Some((selection, self.id));
-                    }
-                }
-                GuiMode::Detach => {
-                    s.detach_d = Some((selection, self.id));
-                }
-                _ => {}
-            }
-
-            return true;
-        };
-
-        if let Some(ds) = &self.dropdown_gui {
-            let close = match ds.kind {
-                DropdownKind::Edit => handle_edit(ds),
-                DropdownKind::Connections => handle_connections(ds),
-            };
-
-            if close {
-                s.open_dropdown = None;
-                self.dropdown_gui = None;
-                return false;
-            }
-
-            if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
-                let mouse_pos = rl.get_mouse_position();
-                if !ds.bounds.check_collision_point_rec(mouse_pos) {
-                    s.open_dropdown = None;
-                    self.dropdown_gui = None;
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn traffic(&self, ports: Vec<usize>) -> Vec<(usize, bool)> {
-        let router_ports = self.router.ports();
-        let mut res = vec![];
-        for p in ports {
-            if router_ports[p].borrow().has_outgoing() {
-                res.push((p, false));
-            }
-            if router_ports[p].borrow().has_incoming() {
-                res.push((p, true));
-            }
-        }
-        res
-    }
 }
-
-impl Storable for RouterDevice {
-    fn store(ds: &mut Devices, pos: Vector2) {
-        let id = DeviceId::Router(ds.next_id_seed());
-        ds.seed += 8;
-
-        ds.lookup.insert(id, ds.routers.len());
-        ds.adj_devices.insert(id, Vec::new());
-        ds.routers.push(RouterDevice {
-            id,
-            router: Router::from_seed(id.as_u32() as u64),
-            pos,
-            label: format!("Router {}", ds.router_count),
-            deleted: false,
-            dropdown_gui: None,
-            edit_gui: RouterEditGuiState {
-                open: false,
-                pos: Vector2::zero(),
-                drag_origin: None,
-                cmd_line_buffer: [0u8; 0xFF],
-                cmd_line_out: VecDeque::new(),
-            },
-            terminal: RouterTerminal::default(),
-        });
-
-        ds.cable_sim.adds(ds.routers.last().unwrap().router.ports());
-        ds.router_count += 1;
-    }
-}
-
-impl Tickable for RouterDevice {
-    fn tick(&mut self) {
-        self.router.tick();
-    }
-}
-//----------------------------------------------
-
-// Packet
-//----------------------------------------------
-pub struct PacketEntity {
-    pos: Vector2,
-    origin: Vector2,
-    destination: Option<Vector2>,
-}
-
-impl PacketEntity {
-    pub fn egress(origin: Vector2, destination: Vector2) -> Self {
-        Self {
-            pos: origin,
-            origin,
-            destination: Some(destination),
-        }
-    }
-
-    pub fn ingress(origin: Vector2) -> Self {
-        Self {
-            pos: origin,
-            origin,
-            destination: None,
-        }
-    }
-}
-
-impl Entity for PacketEntity {
-    fn set_pos(&mut self, pos: Vector2) {
-        self.pos = pos;
-    }
-
-    fn is_deleted(&self) -> bool {
-        false
-    }
-
-    fn pos(&self) -> Vector2 {
-        self.pos
-    }
-
-    fn render(&self, d: &mut RaylibDrawHandle) {
-        d.draw_rectangle(
-            self.pos.x as i32,
-            self.pos.y as i32 - 10,
-            20,
-            20,
-            Color::CADETBLUE,
-        );
-        d.draw_rectangle_lines(
-            self.pos.x as i32,
-            self.pos.y as i32 - 10,
-            20,
-            20,
-            Color::BLACK,
-        );
-    }
-
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.pos.x - 5.0, self.pos.y - 5.0, 10.0, 10.0)
-    }
-}
-
-impl Tickable for PacketEntity {
-    fn tick(&mut self) {
-        if let Some(destination) = self.destination {
-            if self.pos.distance_to(destination) <= 12.0 {
-                return;
-            }
-            let dir = destination - self.pos;
-            self.pos += dir.normalized() * 6.0;
-        }
-    }
-}
-//----------------------------------------------
