@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Virtual Packet Tracer WASM</title>
+    <style>
+      body {
+        margin: 0;
+        background-color: black;
+        display: flex;
+        justify-content: center;
+        height: 100vh;
+      }
+
+      canvas {
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas" tabindex="0"></canvas>
+    <script src="./target/wasm32-unknown-emscripten/release/virtual-packet-tracer.js"></script>
+    <script>
+      window.onload = function () {
+        Module["canvas"] = document.getElementById("canvas");
+        Module.canvas.width = 1400;
+        Module.canvas.height = 750;
+
+        Module.canvas.addEventListener("contextmenu", function (event) {
+          event.preventDefault(); // Prevent right clicks from opening the context menu
+          event.stopPropagation();
+        });
+      };
+    </script>
+  </body>
+</html>

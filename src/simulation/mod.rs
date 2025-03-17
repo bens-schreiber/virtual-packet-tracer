@@ -8,9 +8,9 @@ mod utils;
 
 pub fn run() {
     let (mut rl, thread) = raylib::init()
-        .resizable()
         .size(1400, 750)
         .title("Virtual Packet Tracer")
+        .undecorated()
         .build();
 
     rl.set_target_fps(30);
