@@ -8,7 +8,7 @@ use raylib::{
 use crate::{
     is_mac_multicast_or_broadcast,
     network::{
-        ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame, MacAddress},
+        ethernet::{ByteSerializable, EtherType, Ethernet2Frame, Ethernet802_3Frame},
         ipv4::Ipv4Frame,
     },
 };

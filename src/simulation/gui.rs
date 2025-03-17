@@ -34,25 +34,6 @@ struct Packet {
     time: SystemTime,
 }
 
-impl Packet {
-    fn new(
-        pos: Vector2,
-        last: Option<DeviceId>,
-        current: DeviceId,
-        kind: PacketKind,
-        time: SystemTime,
-    ) -> Self {
-        Self {
-            animating: true,
-            pos,
-            last,
-            current,
-            kind,
-            time,
-        }
-    }
-}
-
 #[derive(Copy, Clone)]
 struct Dropdown {
     device: DeviceId,
@@ -693,27 +674,30 @@ impl Gui {
                         incoming_device_id
                     };
 
-                    self.packet_buffer.push_back(Packet::new(
-                        incoming_id
+                    self.packet_buffer.push_back(Packet {
+                        animating: self.tracer_enabled,
+                        pos: incoming_id
                             .and_then(|id| dr.get(DeviceGetQuery::Id(id)).map(|device| device.pos))
                             .unwrap_or(Vector2::new(0.0, 0.0)),
-                        incoming_id,
-                        id,
-                        packet,
+                        last: incoming_id,
+                        current: id,
+                        kind: packet,
                         time,
-                    ));
+                    })
                 }
 
                 for packet in outgoing_packets {
                     if outgoing_device_id.is_some() {
-                        self.packet_buffer.push_back(Packet::new(
-                            dr.get(DeviceGetQuery::Id(id))
+                        self.packet_buffer.push_back(Packet {
+                            animating: self.tracer_enabled,
+                            pos: dr
+                                .get(DeviceGetQuery::Id(id))
                                 .map_or(Vector2::new(0.0, 0.0), |device| device.pos),
-                            None,
-                            id,
-                            packet,
+                            last: None,
+                            current: id,
+                            kind: packet,
                             time,
-                        ));
+                        });
                     }
                 }
             }
@@ -1166,7 +1150,8 @@ impl Gui {
 
                     y += FONT_SIZE;
 
-                    d.draw_text("Routes: TODO", x, y, FONT_SIZE, Color::WHITE); // TODO: Display routes
+                    d.draw_text("Routes: (todo)", x, y, FONT_SIZE, Color::WHITE);
+                    // TODO: Display routes
                 }
                 PacketKind::Icmp(eth) => {
                     display_eth2_info(&mut y, x, eth, d);
@@ -1373,14 +1358,23 @@ impl Gui {
                     tp.freeze();
                     self.tracer_enabled = true;
                     self.reset_states();
+                    for packet in self.packet_buffer.iter_mut() {
+                        packet.animating = false;
+                    }
                 }
                 GuiButtonClickKind::PlayerPause => {
                     let mut tp = TimeProvider::instance().lock().unwrap();
                     tp.unfreeze();
                     self.tracer_enabled = false;
                     self.reset_states();
+                    for packet in self.packet_buffer.iter_mut() {
+                        packet.animating = false;
+                    }
                 }
                 GuiButtonClickKind::PlayerNext => {
+                    if !self.tracer_enabled {
+                        return;
+                    }
                     let mut tp = TimeProvider::instance().lock().unwrap();
                     tp.advance(Duration::from_millis(1));
                     self.tracer_next = true;

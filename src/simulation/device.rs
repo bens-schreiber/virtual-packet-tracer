@@ -307,8 +307,7 @@ impl DeviceRepository {
             let c = self.get(DeviceGetQuery::Id(*id)).unwrap();
             let i = self.lookup(*id);
 
-            for (e_port, adj_id, _) in adjs {
-                let adj_i = self.lookup(*adj_id);
+            for (port, adj_id, _) in adjs {
                 let target = self.get(DeviceGetQuery::Id(*adj_id)).unwrap();
                 let start_pos = Vector2::new(c.pos.x, c.pos.y);
                 let end_pos = Vector2::new(target.pos.x, target.pos.y);
@@ -318,8 +317,8 @@ impl DeviceRepository {
                 set.insert(*id);
 
                 let is_port_up = match id {
-                    DeviceId::Switch(_) => self.switches[i].device.is_port_up(*e_port),
-                    DeviceId::Router(_) => self.routers[adj_i].device.is_port_up(*e_port),
+                    DeviceId::Switch(_) => self.switches[i].device.is_port_up(*port),
+                    DeviceId::Router(_) => self.routers[i].device.is_port_up(*port),
                     _ => true,
                 };
 
