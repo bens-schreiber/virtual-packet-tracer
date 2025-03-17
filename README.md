@@ -5,6 +5,7 @@ Live WASM compiled demo https://bschr.dev/vpt
 VPT is a Cisco Packet Tracer inspired simulation tool which allows you to create virtual network environments, test communication between devices, trace packets, and inspect input and output.
 Packets are fully serialized to byte level before being transmitted across devices. Currently simulates layers 1 2 and 3 of the OSI model and stays true to their IEEE standards.
 
+https://github.com/user-attachments/assets/9105ace3-b319-4b42-a408-ab7a0ed28a1a
 
 The network features:
 
