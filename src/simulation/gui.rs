@@ -228,6 +228,9 @@ impl Gui {
                         self.terminal_device = Some(dropdown.device);
                         self.terminal_buffer = [0u8; 0xFF];
                         self.terminal_out.clear();
+                        self.terminal_out.push_back(
+                            "Terminal session started. Type \"help\" for help.".to_string(),
+                        );
                         self.reset_states();
                     }
                     1 => {
